@@ -1,0 +1,179 @@
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { App } from '../src/app';
+import { GitHubClient } from '../src/lib/githubClient';
+import type { ISettings, IViewer } from '../src/lib/types';
+
+const VIEWER: IViewer = { login: 'rubensworks', name: 'Ruben Taelman', avatarUrl: 'https://a/x.png' };
+
+const { getViewerMock } = vi.hoisted(() => ({ getViewerMock: vi.fn() }));
+
+vi.mock('../src/lib/githubClient', async(importOriginal) => {
+  const original = await importOriginal<typeof import('../src/lib/githubClient')>();
+  return {
+    ...original,
+    GitHubClient: class FakeGitHubClient {
+      public readonly token: string;
+      public readonly getViewer = getViewerMock;
+
+      public constructor(token: string) {
+        this.token = token;
+      }
+    },
+  };
+});
+
+// The dashboard itself is covered by its own suite; here it only has to expose its callbacks.
+vi.mock('../src/components/dashboard', () => ({
+  Dashboard: (props: {
+    viewer: IViewer;
+    settings: ISettings;
+    onSettingsChange: (settings: ISettings) => void;
+    onSignOut: () => void;
+  }) => (
+    <div>
+      <span>signed in as {props.viewer.login}</span>
+      <span>window {props.settings.windowDays}</span>
+      <button type="button" onClick={() => props.onSettingsChange({ ...props.settings, windowDays: 7 })}>
+        narrow
+      </button>
+      <button type="button" onClick={props.onSignOut}>leave</button>
+    </div>
+  ),
+}));
+
+const TOKEN_KEY = 'gh-actions-overview:token';
+
+beforeEach(() => {
+  localStorage.clear();
+  sessionStorage.clear();
+  getViewerMock.mockReset();
+  getViewerMock.mockResolvedValue(VIEWER);
+  document.documentElement.removeAttribute('data-theme');
+});
+
+afterEach(cleanup);
+
+describe('App', () => {
+  it('shows the setup screen when no token is stored', async() => {
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('Fine-grained personal access token')).toBeDefined());
+    expect(getViewerMock).not.toHaveBeenCalled();
+  });
+
+  it('shows a boot message while the stored token is checked', () => {
+    localStorage.setItem(TOKEN_KEY, 'stored');
+    render(<App />);
+    expect(screen.getByText('Checking stored token…')).toBeDefined();
+  });
+
+  it('goes straight to the dashboard with a valid stored token', async() => {
+    localStorage.setItem(TOKEN_KEY, 'stored');
+    render(<App />);
+    await waitFor(() => expect(screen.getByText(/signed in as rubensworks/u)).toBeDefined());
+  });
+
+  it('drops a stored token that the API rejects', async() => {
+    localStorage.setItem(TOKEN_KEY, 'stale');
+    getViewerMock.mockRejectedValue(Object.assign(new Error('Bad credentials'), { status: 401 }));
+    render(<App />);
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).toContain('Token is invalid or expired'));
+    expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
+  });
+
+  it('connects with a pasted token and remembers it', async() => {
+    render(<App />);
+    await waitFor(() => expect(screen.getByPlaceholderText('github_pat_...')).toBeDefined());
+    fireEvent.change(screen.getByPlaceholderText('github_pat_...'), { target: { value: 'pasted' }});
+    fireEvent.click(screen.getByText('Connect'));
+    await waitFor(() => expect(screen.getByText(/signed in as rubensworks/u)).toBeDefined());
+    expect(localStorage.getItem(TOKEN_KEY)).toBe('pasted');
+  });
+
+  it('keeps a pasted token out of local storage when asked', async() => {
+    render(<App />);
+    await waitFor(() => expect(screen.getByPlaceholderText('github_pat_...')).toBeDefined());
+    fireEvent.change(screen.getByPlaceholderText('github_pat_...'), { target: { value: 'pasted' }});
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByText('Connect'));
+    await waitFor(() => expect(screen.getByText(/signed in as rubensworks/u)).toBeDefined());
+    expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
+    expect(sessionStorage.getItem(TOKEN_KEY)).toBe('pasted');
+  });
+
+  it('reports a pasted token that the API rejects, without storing it', async() => {
+    getViewerMock.mockRejectedValue(Object.assign(new Error('Bad credentials'), { status: 401 }));
+    render(<App />);
+    await waitFor(() => expect(screen.getByPlaceholderText('github_pat_...')).toBeDefined());
+    fireEvent.change(screen.getByPlaceholderText('github_pat_...'), { target: { value: 'bad' }});
+    fireEvent.click(screen.getByText('Connect'));
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).toBe('Token is invalid or expired'));
+    expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
+  });
+
+  it('signs out back to the setup screen', async() => {
+    localStorage.setItem(TOKEN_KEY, 'stored');
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('leave')).toBeDefined());
+    fireEvent.click(screen.getByText('leave'));
+    expect(screen.getByText('Fine-grained personal access token')).toBeDefined();
+    expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
+  });
+
+  it('persists settings changes', async() => {
+    localStorage.setItem(TOKEN_KEY, 'stored');
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('narrow')).toBeDefined());
+    fireEvent.click(screen.getByText('narrow'));
+    expect(screen.getByText('window 7')).toBeDefined();
+    expect(localStorage.getItem('gh-actions-overview:settings')).toContain('"windowDays":7');
+  });
+
+  it('applies the stored theme to the document', async() => {
+    localStorage.setItem('gh-actions-overview:settings', JSON.stringify({ theme: 'light' }));
+    render(<App />);
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBe('light'));
+  });
+
+  it('does not touch state after unmounting mid-check', async() => {
+    localStorage.setItem(TOKEN_KEY, 'stored');
+    let release = (): void => undefined;
+    getViewerMock.mockImplementation(async() => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return VIEWER;
+    });
+    const { unmount } = render(<App />);
+    unmount();
+    release();
+    await waitFor(() => expect(getViewerMock).toHaveBeenCalled());
+  });
+
+  it('keeps the stored token when the check fails after unmounting', async() => {
+    localStorage.setItem(TOKEN_KEY, 'stored');
+    let fail = (): void => undefined;
+    getViewerMock.mockImplementation(async() => {
+      await new Promise((_resolve, reject) => {
+        fail = (): void => reject(new Error('late failure'));
+      });
+      return VIEWER;
+    });
+    const { unmount } = render(<App />);
+    unmount();
+    fail();
+    await waitFor(() => expect(getViewerMock).toHaveBeenCalled());
+    expect(localStorage.getItem(TOKEN_KEY)).toBe('stored');
+  });
+
+  it('is constructed with the token the user pasted', async() => {
+    render(<App />);
+    await waitFor(() => expect(screen.getByPlaceholderText('github_pat_...')).toBeDefined());
+    fireEvent.change(screen.getByPlaceholderText('github_pat_...'), { target: { value: 'abc123' }});
+    fireEvent.click(screen.getByText('Connect'));
+    await waitFor(() => expect(screen.getByText(/signed in as/u)).toBeDefined());
+    expect(new GitHubClient('abc123')).toHaveProperty('token', 'abc123');
+  });
+});

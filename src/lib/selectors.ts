@@ -1,5 +1,5 @@
 import type { OverallStatus } from './favicon';
-import type { IFilters, IRepoState, IWorkflowGroup } from './types';
+import type { IFilters, IRepoState, IWorkflowGroup, IWorkflowRun } from './types';
 import { isActive } from './types';
 
 export interface ISummary {
@@ -21,8 +21,16 @@ export interface ISummary {
   overall: OverallStatus;
 }
 
-function latestStates(workflows: IWorkflowGroup[]): IWorkflowGroup[] {
-  return workflows.filter(group => group.runs.length > 0);
+// The most recent run of every workflow that has ever run.
+function latestRuns(workflows: IWorkflowGroup[]): IWorkflowRun[] {
+  const runs: IWorkflowRun[] = [];
+  for (const group of workflows) {
+    const latest = group.runs[0];
+    if (latest !== undefined) {
+      runs.push(latest);
+    }
+  }
+  return runs;
 }
 
 function matchesQuery(repo: IRepoState, needle: string): boolean {
@@ -36,10 +44,6 @@ function matchesQuery(repo: IRepoState, needle: string): boolean {
     return group.runs.some(run =>
       run.branch.toLowerCase().includes(needle) || run.commitMessage.toLowerCase().includes(needle));
   });
-}
-
-function hasState(repo: IRepoState, predicate: (group: IWorkflowGroup) => boolean): boolean {
-  return latestStates(repo.workflows).some(predicate);
 }
 
 /**
@@ -58,11 +62,7 @@ export function summarize(repos: IRepoState[], filters: IFilters): ISummary {
     if (repo.load === 'no-actions') {
       withoutWorkflows++;
     }
-    for (const group of latestStates(repo.workflows)) {
-      const latest = group.runs[0];
-      if (latest === undefined) {
-        continue;
-      }
+    for (const latest of latestRuns(repo.workflows)) {
       if (latest.state === 'failure') {
         failureCount++;
       }
@@ -81,13 +81,10 @@ export function summarize(repos: IRepoState[], filters: IFilters): ISummary {
     if (filters.org.length > 0 && repo.repo.owner.toLowerCase() !== filters.org.toLowerCase()) {
       return false;
     }
-    if (filters.onlyFailures && !hasState(repo, group => group.runs[0]?.state === 'failure')) {
+    if (filters.onlyFailures && !latestRuns(repo.workflows).some(latest => latest.state === 'failure')) {
       return false;
     }
-    if (filters.onlyRunning && !hasState(repo, (group) => {
-      const latest = group.runs[0];
-      return latest !== undefined && isActive(latest.state);
-    })) {
+    if (filters.onlyRunning && !latestRuns(repo.workflows).some(latest => isActive(latest.state))) {
       return false;
     }
     return needle.length === 0 || matchesQuery(repo, needle);

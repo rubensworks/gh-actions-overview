@@ -59,8 +59,11 @@ export default config([
         },
         { selector: 'import', format: null },
         { selector: [ 'objectLiteralProperty', 'typeProperty' ], format: null },
-        // React components are functions, and they are PascalCase by convention.
-        { selector: 'function', format: [ 'camelCase', 'PascalCase' ]},
+        // React components are functions, and they are PascalCase by convention. That extends to
+        // components handed to a module mock as object literal members.
+        { selector: [ 'function', 'objectLiteralMethod' ], format: [ 'camelCase', 'PascalCase' ]},
+        // A leading underscore marks a parameter that only exists to reach the ones after it.
+        { selector: 'parameter', format: [ 'camelCase' ], leadingUnderscore: 'allow' },
         {
           selector: 'variable',
           format: [ 'camelCase', 'PascalCase', 'UPPER_CASE' ],
@@ -75,6 +78,13 @@ export default config([
           custom: { regex: '^I[A-Z]', match: true },
         },
       ],
+    },
+  },
+  {
+    files: [ 'test/**' ],
+    rules: {
+      // Suites are named after the exported symbol they cover, which is often PascalCase.
+      'test/prefer-lowercase-title': [ 'error', { ignore: [ 'describe' ]}],
     },
   },
 ], { disableJest: true });

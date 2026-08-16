@@ -11,6 +11,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "test": "vitest run --coverage",
+    "test:watch": "vitest",
     "lint": "eslint . --cache",
     "lint:fix": "eslint . --cache --fix"
   },
@@ -21,11 +23,15 @@
   },
   "devDependencies": {
     "@rubensworks/eslint-config": "^3.1.0",
+    "@testing-library/react": "^16.3.2",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
+    "@vitest/coverage-v8": "^4.1.10",
     "eslint": "^8.57.1",
+    "jsdom": "^30.0.1",
     "typescript": "^5.7.3",
-    "vite": "^6.0.11"
+    "vite": "^6.0.11",
+    "vitest": "^4.1.10"
   }
 }
