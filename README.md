@@ -22,6 +22,8 @@ this app ever talks to is `api.github.com`, straight from your browser.
 - **The default branch is the status.** Each workflow reports its newest run on the repository's
   default branch, however long ago that was. A red feature branch never displaces a green `master`,
   and the failure count and the favicon follow the same rule.
+- **Sorting** by last push, last workflow run, last default-branch run, failures first, stars, or
+  name — part of the URL fragment like every other bit of view state.
 - **Smart polling.** Repositories with a queued or running workflow refresh every 15 seconds;
   quiet ones every 2–5 minutes, jittered so requests do not arrive in bursts. Polling pauses
   entirely while the tab is hidden.
@@ -66,29 +68,39 @@ a token, a `#owner=` link uses it automatically, and neither limit applies.
 
 ## Setting up a token
 
-The dashboard needs a GitHub personal access token to read your workflow runs. A **fine-grained**
-token with two read-only permissions is enough.
+The dashboard needs a GitHub personal access token to read your workflow runs, and it needs
+remarkably little from it. Go to [**Settings → Developer settings → Personal access tokens →
+Fine-grained tokens**](https://github.com/settings/personal-access-tokens/new) and work down the
+form:
 
-1. Go to [**Settings → Developer settings → Personal access tokens → Fine-grained
-   tokens**](https://github.com/settings/personal-access-tokens/new).
-2. **Repository access**: either *All repositories*, or hand-pick the ones you want on the
-   dashboard.
-3. **Repository permissions** — set exactly these two, and nothing else:
-
-   | Permission | Access      | Why                                                       |
-   |------------|-------------|-----------------------------------------------------------|
-   | Metadata   | Read-only   | Mandatory for every fine-grained token; lists your repos. |
-   | Actions    | Read-only   | Exposes workflows and workflow runs.                      |
-
+1. **Resource owner.** The setting that actually decides what the token can reach: it only ever
+   sees repositories owned by this one account. Pick yourself for your own repositories.
+2. **Repository access.** *All repositories*, or hand-pick the ones you want on the dashboard.
+3. **Repository permissions → Actions: Read-only.** The only permission you have to set by hand,
+   and only for **private** repositories. Picking it also sets **Metadata: Read-only** for you —
+   metadata is mandatory for every fine-grained token, which is why there is no separate checkbox
+   for it. If you go looking for one, that is why you cannot find it.
 4. Copy the token and paste it into the setup screen.
 
-No write scopes, no organisation permissions, and no account permissions are needed. For
-repositories owned by an organisation, an organisation owner may still have to approve the token
-before it becomes usable — until then those repositories simply will not appear.
+**Only public repositories?** Tick nothing at all. Fine-grained tokens carry read-only access to
+public data on their own, so a freshly created token with no permissions selected already works —
+it just cannot see anything private. That is why the dashboard appears to need no permissions.
 
 A classic PAT works too, if you prefer: it needs `repo` for private repositories, or `public_repo`
 for public ones only. Fine-grained tokens are strongly recommended, because they can be scoped down
 to read-only.
+
+### Organisations need their own token
+
+A fine-grained token is bound to a single resource owner, so the one you created for your own
+account **cannot list an organisation's private repositories**. Asking for them comes back as
+`403 Access forbidden`.
+
+Adding an organisation under *Settings → Extra organisations* still works: when the organisation
+listing is refused, the dashboard falls back to the public listing for that login, so you get its
+public repositories and no error. To see the private ones as well, create a **second token with the
+organisation as its resource owner** — which an organisation owner may have to approve first — and
+paste that one in instead.
 
 ![The setup screen](docs/screenshots/setup.png)
 
@@ -131,7 +143,8 @@ out of the way.
 In **Settings** you can:
 
 - change the push window (any number of days);
-- add **organisations**, which pulls in their repositories too;
+- add **organisations**, which pulls in their repositories too — public-only unless the token's
+  resource owner *is* that organisation, see [above](#organisations-need-their-own-token);
 - **pin** individual `owner/repo` entries, which are always shown regardless of the push window;
 - include archived repositories;
 - switch the theme and enable failure notifications;
@@ -149,9 +162,33 @@ trunk never speaks for the repository.
 Everything derived from that line follows it, so the *Failing* count, the *only failures* filter,
 and the red/green favicon all report the state of the default branch, not of the busiest branch.
 
-Only if none of the ten fetched runs is on the default branch does the newest run stand in. The
-repository drawer is unaffected and still lists every run of every workflow in chronological order,
-side branches included.
+Ten runs is normally plenty to find the default branch, but a repository whose pull requests arrive
+in batches — anything Renovate or Dependabot tends, especially with `on: [push, pull_request]`,
+which produces two runs per bot branch — can fill that whole window with side branches. When that
+happens the dashboard issues a second, branch-filtered request to find the runs that actually
+matter. It is conditional like every other request, so a quiet default branch answers `304` and
+costs no quota.
+
+If a workflow has genuinely never run on the default branch, its newest run is shown **greyed out**
+instead, and counts towards nothing: not the *Failing* tally, not the filters, and not the favicon.
+
+The repository drawer is unaffected and still lists every run of every workflow in chronological
+order, side branches included, with links to both the repository and its Actions tab.
+
+## Ordering
+
+The row order is a dropdown in the filter bar, and part of the URL fragment:
+
+| Sort | What it orders on |
+|------|-------------------|
+| Last push (default) | `pushed_at`, the last push to *any* branch |
+| Last default-branch run | The newest run shown on the row, so the closest free proxy for "last commit on the trunk that ran CI" |
+| Last workflow run | The newest run on any branch, bot branches included |
+| Failing first | Failing, then running, then everything else |
+| Stars | `stargazers_count`, descending |
+| Name | `owner/name`, so owners stay grouped |
+
+Ties fall back to the last push, and then to the name, so the order is stable across refreshes.
 
 Settings are persisted in `localStorage`. The view — the owner being browsed and every filter —
 is persisted in the URL fragment (`#owner=comunica&failures=1`), which browsers never send to a

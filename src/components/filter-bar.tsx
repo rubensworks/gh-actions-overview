@@ -1,4 +1,7 @@
-import type { IFilters } from '../lib/types';
+import type { IFilters, SortKey } from '../lib/types';
+import { SORT_LABELS } from '../lib/types';
+
+const SORT_KEYS = Object.keys(SORT_LABELS) as SortKey[];
 
 export interface IFilterBarProps {
   filters: IFilters;
@@ -54,6 +57,17 @@ export function FilterBar(props: IFilterBarProps) {
       >
         <option value="">All owners</option>
         {owners.map(owner => <option key={owner} value={owner}>{owner}</option>)}
+      </select>
+
+      <select
+        className="filters__select"
+        value={filters.sort}
+        aria-label="Sort repositories by"
+        onChange={event => onChange({ ...filters, sort: event.target.value as SortKey })}
+      >
+        {SORT_KEYS.map(key => (
+          <option key={key} value={key}>Sort: {SORT_LABELS[key]}</option>
+        ))}
       </select>
 
       <span className="filters__count">

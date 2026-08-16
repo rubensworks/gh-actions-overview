@@ -6,10 +6,12 @@ import { NOW, repoState, workflowGroup, workflowRun } from '../fixtures';
 afterEach(cleanup);
 
 describe('RepoDrawer', () => {
-  it('names the repository and links to its Actions tab', () => {
+  it('names the repository and links to both the repository and its Actions tab', () => {
     render(<RepoDrawer repo={repoState('rubensworks/jbr.js')} now={NOW} onClose={vi.fn()} />);
     expect(screen.getByText('rubensworks/jbr.js')).toBeDefined();
-    expect(screen.getByText('Open Actions on github.com').getAttribute('href'))
+    expect(screen.getByText('Open repository').getAttribute('href'))
+      .toBe('https://github.com/rubensworks/jbr.js');
+    expect(screen.getByText('Open Actions').getAttribute('href'))
       .toBe('https://github.com/rubensworks/jbr.js/actions');
   });
 

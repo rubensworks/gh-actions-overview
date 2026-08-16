@@ -2,7 +2,13 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { IFilters } from '../src/lib/types';
 import { EMPTY_FILTERS, readFilters, readOwner, toHash, writeUrlState } from '../src/lib/urlState';
 
-const FULL: IFilters = { query: 'rdf', onlyFailures: true, onlyRunning: true, org: 'comunica' };
+const FULL: IFilters = {
+  query: 'rdf',
+  onlyFailures: true,
+  onlyRunning: true,
+  org: 'comunica',
+  sort: 'stars',
+};
 
 describe('readOwner', () => {
   it('is empty when the fragment names no owner', () => {
@@ -25,7 +31,7 @@ describe('readFilters', () => {
   });
 
   it('reads every filter', () => {
-    expect(readFilters('#q=rdf&failures=1&running=1&org=comunica')).toEqual(FULL);
+    expect(readFilters('#q=rdf&failures=1&running=1&org=comunica&sort=stars')).toEqual(FULL);
   });
 
   it('treats any value other than 1 as off', () => {
@@ -43,7 +49,7 @@ describe('toHash', () => {
   });
 
   it('serializes the owner and every filter', () => {
-    expect(toHash('comunica', FULL)).toBe('#owner=comunica&q=rdf&failures=1&running=1&org=comunica');
+    expect(toHash('comunica', FULL)).toBe('#owner=comunica&q=rdf&failures=1&running=1&org=comunica&sort=stars');
   });
 
   it('serializes an owner on its own', () => {
@@ -64,7 +70,7 @@ describe('writeUrlState', () => {
 
   it('writes the view into the fragment, never the query string', () => {
     writeUrlState('comunica', FULL);
-    expect(location.hash).toBe('#owner=comunica&q=rdf&failures=1&running=1&org=comunica');
+    expect(location.hash).toBe('#owner=comunica&q=rdf&failures=1&running=1&org=comunica&sort=stars');
     expect(location.search).toBe('');
     expect(location.pathname).toBe('/dashboard');
   });
@@ -87,6 +93,6 @@ describe('writeUrlState', () => {
     const before = history.length;
     writeUrlState('comunica', FULL);
     expect(history.length).toBe(before);
-    expect(location.hash).toBe('#owner=comunica&q=rdf&failures=1&running=1&org=comunica');
+    expect(location.hash).toBe('#owner=comunica&q=rdf&failures=1&running=1&org=comunica&sort=stars');
   });
 });

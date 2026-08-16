@@ -186,7 +186,8 @@ describe('Dashboard', () => {
   it('renders one row per repository', () => {
     const { store } = renderDashboard();
     load(store());
-    expect(rows()).toEqual([ 'jbr.js', 'comunica' ]);
+    // Both fixtures were pushed at the same moment, so the name breaks the tie.
+    expect(rows()).toEqual([ 'comunica', 'jbr.js' ]);
   });
 
   it('asks the store for an immediate refresh', () => {

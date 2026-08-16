@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { summarize } from '../src/lib/selectors';
-import type { IFilters } from '../src/lib/types';
+import { sortRepos, summarize } from '../src/lib/selectors';
+import type { IFilters, SortKey } from '../src/lib/types';
 import { EMPTY_FILTERS } from '../src/lib/urlState';
-import { repoState, workflowGroup, workflowRun } from './fixtures';
+import { offTrunkGroup, repoRef, repoState, workflowGroup, workflowRun } from './fixtures';
 
 function filters(overrides: Partial<IFilters> = {}): IFilters {
   return { ...EMPTY_FILTERS, ...overrides };
@@ -183,5 +183,133 @@ describe('summarize', () => {
       const dormant = repoState('a/b', { workflows: [ workflowGroup('CI', []) ]});
       expect(summarize([ dormant ], filters({ query: 'master' })).visible).toEqual([]);
     });
+  });
+});
+
+describe('sortRepos', () => {
+  const old = repoState('a/old', {
+    repo: repoRef('a/old', { pushedAt: '2026-04-01T00:00:00Z', stars: 900 }),
+    workflows: [ workflowGroup('CI', [
+      workflowRun('success', { createdAt: '2026-03-01T00:00:00Z' }),
+    ]) ],
+  });
+  const recent = repoState('b/recent', {
+    repo: repoRef('b/recent', { pushedAt: '2026-04-30T00:00:00Z', stars: 3 }),
+    workflows: [ workflowGroup('CI', [
+      workflowRun('failure', { createdAt: '2026-04-29T00:00:00Z' }),
+    ]) ],
+  });
+  // Its side branch ran most recently of all, but never the default branch.
+  const sideBranch = repoState('c/side', {
+    repo: repoRef('c/side', { pushedAt: '2026-04-15T00:00:00Z', stars: 40 }),
+    workflows: [ offTrunkGroup(
+      'CI',
+      [ workflowRun('running', { branch: 'feature', createdAt: '2026-04-30T12:00:00Z' }) ],
+    ) ],
+  });
+  const all = [ old, recent, sideBranch ];
+
+  function order(sort: SortKey): string[] {
+    return sortRepos(all, sort).map(repo => repo.repo.name);
+  }
+
+  it('leaves the input untouched', () => {
+    sortRepos(all, 'name');
+    expect(all.map(repo => repo.repo.name)).toEqual([ 'old', 'recent', 'side' ]);
+  });
+
+  it('sorts by last push, newest first', () => {
+    expect(order('pushed')).toEqual([ 'recent', 'side', 'old' ]);
+  });
+
+  it('sorts by name', () => {
+    expect(order('name')).toEqual([ 'old', 'recent', 'side' ]);
+  });
+
+  it('sorts by stars, most first', () => {
+    expect(order('stars')).toEqual([ 'old', 'side', 'recent' ]);
+  });
+
+  it('sorts by the last run on any branch', () => {
+    expect(order('run')).toEqual([ 'side', 'recent', 'old' ]);
+  });
+
+  it('sorts by the last default-branch run, ignoring side branches', () => {
+    expect(order('default-run')).toEqual([ 'recent', 'old', 'side' ]);
+  });
+
+  it('sorts failing repositories first, and discounts an off-trunk running one', () => {
+    expect(order('status')).toEqual([ 'recent', 'side', 'old' ]);
+  });
+
+  it('sorts a running default branch above a quiet one, and below a failing one', () => {
+    const busy = repoState('b/busy', {
+      repo: repoRef('b/busy', { pushedAt: '2026-01-01T00:00:00Z' }),
+      workflows: [ workflowGroup('CI', [ workflowRun('running') ]) ],
+    });
+    expect(sortRepos([ old, busy, recent ], 'status').map(repo => repo.repo.name))
+      .toEqual([ 'recent', 'busy', 'old' ]);
+  });
+
+  it('sorts a repository with no runs to the bottom of a time-based order', () => {
+    const barren = repoState('d/barren', {
+      repo: repoRef('d/barren', { pushedAt: '2026-04-29T00:00:00Z' }),
+      workflows: [],
+    });
+    expect(sortRepos([ barren, old ], 'run').map(repo => repo.repo.name)).toEqual([ 'old', 'barren' ]);
+  });
+
+  it('breaks a tie on the last push', () => {
+    const left = repoState('x/left', { repo: repoRef('x/left', { pushedAt: '2026-04-01T00:00:00Z' }) });
+    const right = repoState('x/right', { repo: repoRef('x/right', { pushedAt: '2026-04-02T00:00:00Z' }) });
+    expect(sortRepos([ left, right ], 'stars').map(repo => repo.repo.name)).toEqual([ 'right', 'left' ]);
+  });
+
+  it('breaks a tie on the name when even the push dates match', () => {
+    const left = repoState('x/beta');
+    const right = repoState('x/alpha');
+    expect(sortRepos([ left, right ], 'stars').map(repo => repo.repo.name)).toEqual([ 'alpha', 'beta' ]);
+  });
+
+  it('is what summarize applies to the visible rows', () => {
+    expect(summarize(all, filters({ sort: 'name' })).visible.map(repo => repo.repo.name))
+      .toEqual([ 'old', 'recent', 'side' ]);
+  });
+});
+
+// A workflow that never ran on the default branch says nothing about the repository, so it must
+// not turn the dashboard — or the favicon — red.
+describe('workflows that never ran on the default branch', () => {
+  const sideBranchOnly = repoState('a/renovated', {
+    workflows: [ offTrunkGroup('CI', [
+      workflowRun('failure', { branch: 'renovate/actions-checkout-7' }),
+    ]) ],
+  });
+
+  it('are not counted as failing', () => {
+    expect(summarize([ sideBranchOnly ], filters()).failureCount).toBe(0);
+  });
+
+  it('are not counted as running', () => {
+    const repo = repoState('a/b', {
+      workflows: [ offTrunkGroup('CI', [ workflowRun('running', { branch: 'feature' }) ]) ],
+    });
+    expect(summarize([ repo ], filters()).runningCount).toBe(0);
+  });
+
+  it('leave the overall status green rather than red', () => {
+    expect(summarize([ sideBranchOnly ], filters()).overall).toBe('success');
+  });
+
+  it('are hidden by the failures filter', () => {
+    expect(summarize([ sideBranchOnly ], filters({ onlyFailures: true })).visible).toEqual([]);
+  });
+
+  it('are hidden by the running filter', () => {
+    expect(summarize([ sideBranchOnly ], filters({ onlyRunning: true })).visible).toEqual([]);
+  });
+
+  it('are still listed, so the repository does not silently vanish', () => {
+    expect(summarize([ sideBranchOnly ], filters()).visible).toEqual([ sideBranchOnly ]);
   });
 });

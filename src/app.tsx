@@ -11,7 +11,7 @@ import {
   tokenLocation,
 } from './lib/storage';
 import type { ISettings, IViewer, TokenLocation } from './lib/types';
-import { readOwner, writeUrlState } from './lib/urlState';
+import { EMPTY_FILTERS, readOwner, writeUrlState } from './lib/urlState';
 
 interface ISession {
   client: GitHubClient;
@@ -84,7 +84,7 @@ export function App() {
 
   const browse = useCallback((owner: string) => {
     setAuthError(undefined);
-    writeUrlState(owner, { query: '', onlyFailures: false, onlyRunning: false, org: '' });
+    writeUrlState(owner, EMPTY_FILTERS);
     setSession({ client: new GitHubClient(undefined), viewer: undefined, owner });
   }, []);
 
@@ -132,7 +132,7 @@ export function App() {
   const leave = useCallback(() => {
     clearToken();
     setTokenAt('none');
-    writeUrlState('', { query: '', onlyFailures: false, onlyRunning: false, org: '' });
+    writeUrlState('', EMPTY_FILTERS);
     setSession(undefined);
     setAuthError(undefined);
   }, []);

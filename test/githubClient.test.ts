@@ -60,6 +60,7 @@ const REPO: IRepoRef = {
   archived: false,
   pushedAt: '2026-05-01T00:00:00Z',
   defaultBranch: 'master',
+  stars: 12,
   source: 'user',
 };
 
@@ -205,7 +206,7 @@ describe('describeError', () => {
 
   it('describes a plain forbidden response', () => {
     expect(describeError(new HttpError(403, 'Resource not accessible')))
-      .toContain('missing the required permissions');
+      .toContain('only reaches the owner it was created for');
   });
 
   it('describes a missing resource', () => {
@@ -264,7 +265,7 @@ describe('groupRuns', () => {
     const groups = groupRuns([ run({ workflowId: 99, workflowName: 'Ghost' }) ], [], 'master');
     const ghost = run({ workflowId: 99, workflowName: 'Ghost' });
     expect(groups).toEqual([
-      { workflowId: 99, name: 'Ghost', runs: [ ghost ], primary: ghost },
+      { workflowId: 99, name: 'Ghost', runs: [ ghost ], primary: ghost, latest: ghost },
     ]);
   });
 
@@ -306,7 +307,7 @@ describe('groupRuns', () => {
       expect(groups[0]?.primary?.id).toBe(2);
     });
 
-    it('falls back to the newest run when the default branch has none', () => {
+    it('is undefined when the default branch has no run, however busy the side branches are', () => {
       const groups = groupRuns(
         [
           run({ id: 1, branch: 'feature', createdAt: '2026-05-01T10:00:00Z' }),
@@ -315,11 +316,14 @@ describe('groupRuns', () => {
         [ workflow(10, 'CI') ],
         'master',
       );
-      expect(groups[0]?.primary?.id).toBe(2);
+      expect(groups[0]?.primary).toBeUndefined();
+      expect(groups[0]?.latest?.id).toBe(2);
     });
 
     it('is undefined for a workflow that never ran', () => {
-      expect(groupRuns([], [ workflow(10, 'CI') ], 'master')[0]?.primary).toBeUndefined();
+      const [ group ] = groupRuns([], [ workflow(10, 'CI') ], 'master');
+      expect(group?.primary).toBeUndefined();
+      expect(group?.latest).toBeUndefined();
     });
   });
 
@@ -484,6 +488,7 @@ describe('GitHubClient', () => {
         archived: false,
         pushedAt: '2026-05-01T00:00:00Z',
         defaultBranch: 'master',
+        stars: 0,
         source: 'user',
       });
     });
@@ -530,14 +535,45 @@ describe('GitHubClient', () => {
     });
   });
 
-  it('lists organisation repositories', async() => {
-    requestMock.mockResolvedValue(response([ apiRepo('comunica', '2026-05-01T00:00:00Z') ]));
-    const repos = await new GitHubClient('t').listOrgRepos('comunica', 0);
-    expect(requestMock).toHaveBeenCalledWith(
-      'GET /orgs/{org}/repos',
-      expect.objectContaining({ org: 'comunica' }),
-    );
-    expect(repos[0]?.source).toBe('org');
+  describe('listOrgRepos', () => {
+    it('lists organisation repositories', async() => {
+      requestMock.mockResolvedValue(response([ apiRepo('comunica', '2026-05-01T00:00:00Z') ]));
+      const repos = await new GitHubClient('t').listOrgRepos('comunica', 0);
+      expect(requestMock).toHaveBeenCalledWith(
+        'GET /orgs/{org}/repos',
+        expect.objectContaining({ org: 'comunica' }),
+      );
+      expect(repos[0]?.source).toBe('org');
+    });
+
+    // A fine-grained token is bound to one resource owner, so an organisation it was not created
+    // for is forbidden — but that organisation's public repositories are readable all the same.
+    for (const status of [ 403, 404 ]) {
+      it(`falls back to the public listing on a ${status}`, async() => {
+        requestMock
+          .mockRejectedValueOnce(new HttpError(status, 'Resource not accessible by personal access token'))
+          .mockResolvedValueOnce(response([ apiRepo('comunica', '2026-05-01T00:00:00Z') ]));
+        const repos = await new GitHubClient('t').listOrgRepos('comunica', 0);
+        expect(requestMock).toHaveBeenLastCalledWith(
+          'GET /users/{username}/repos',
+          expect.objectContaining({ username: 'comunica' }),
+        );
+        expect(repos[0]?.source).toBe('org');
+      });
+    }
+
+    it('rethrows anything that is not a permission problem', async() => {
+      requestMock.mockRejectedValue(new HttpError(500, 'Server error'));
+      await expect(new GitHubClient('t').listOrgRepos('comunica', 0)).rejects.toThrow('Server error');
+      expect(requestMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('rethrows when the public listing fails too', async() => {
+      requestMock
+        .mockRejectedValueOnce(new HttpError(403, 'Resource not accessible'))
+        .mockRejectedValueOnce(new HttpError(404, 'Not Found'));
+      await expect(new GitHubClient('t').listOrgRepos('nope', 0)).rejects.toThrow('Not Found');
+    });
   });
 
   it('resolves a single repository as a manual entry', async() => {
@@ -610,6 +646,82 @@ describe('GitHubClient', () => {
         'GET /repos/{owner}/{repo}/actions/runs',
         expect.objectContaining({ owner: 'rubensworks', repo: 'jbr.js', per_page: 10 }),
       );
+    });
+
+    it('does not ask twice when the default branch is already in the window', async() => {
+      requestMock.mockResolvedValue(response({ total_count: 1, workflow_runs: [ apiRun() ]}));
+      await new GitHubClient('t').listRuns(REPO, [ workflow(10, 'CI') ]);
+      expect(requestMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not ask twice for a workflow that never ran at all', async() => {
+      requestMock.mockResolvedValue(response({ total_count: 0, workflow_runs: []}));
+      await new GitHubClient('t').listRuns(REPO, [ workflow(10, 'CI') ]);
+      expect(requestMock).toHaveBeenCalledTimes(1);
+    });
+
+    // A repository whose pull requests arrive in batches can push its default branch out of the
+    // ten newest runs entirely, which used to leave a side branch speaking for the repository.
+    describe('when side branches fill the window', () => {
+      const sideBranch = apiRun({
+        id: 7,
+        head_branch: 'renovate/actions-checkout-7',
+        conclusion: 'failure',
+        created_at: '2026-05-01T11:00:00Z',
+      });
+      const onMaster = apiRun({
+        id: 3,
+        head_branch: 'master',
+        conclusion: 'success',
+        created_at: '2026-04-20T09:00:00Z',
+      });
+
+      beforeEach(() => {
+        requestMock.mockImplementation(async(_route: string, parameters: Record<string, unknown>) =>
+          response({
+            total_count: 1,
+            workflow_runs: parameters.branch === undefined ? [ sideBranch ] : [ onMaster ],
+          }));
+      });
+
+      it('asks the default branch directly', async() => {
+        await new GitHubClient('t').listRuns(REPO, [ workflow(10, 'CI') ]);
+        expect(requestMock).toHaveBeenCalledTimes(2);
+        expect(requestMock).toHaveBeenLastCalledWith(
+          'GET /repos/{owner}/{repo}/actions/runs',
+          expect.objectContaining({ branch: 'master', per_page: 10 }),
+        );
+      });
+
+      it('reports the older default-branch run rather than the newer side branch', async() => {
+        const groups = await new GitHubClient('t').listRuns(REPO, [ workflow(10, 'CI') ]);
+        expect(groups[0]?.primary?.id).toBe(3);
+        expect(groups[0]?.primary?.state).toBe('success');
+        expect(groups[0]?.latest?.id).toBe(7);
+      });
+
+      it('keeps both listings in the history, without duplicating the overlap', async() => {
+        requestMock.mockImplementation(async(_route: string, parameters: Record<string, unknown>) =>
+          response({
+            total_count: 2,
+            workflow_runs: parameters.branch === undefined ?
+                [ sideBranch ] :
+                [ sideBranch, onMaster ],
+          }));
+        const groups = await new GitHubClient('t').listRuns(REPO, [ workflow(10, 'CI') ]);
+        expect(groups[0]?.runs.map(entry => entry.id)).toEqual([ 7, 3 ]);
+      });
+
+      it('leaves the workflow unrepresented when even the default branch has nothing', async() => {
+        requestMock.mockImplementation(async(_route: string, parameters: Record<string, unknown>) =>
+          response({
+            total_count: 1,
+            workflow_runs: parameters.branch === undefined ? [ sideBranch ] : [],
+          }));
+        const groups = await new GitHubClient('t').listRuns(REPO, [ workflow(10, 'CI') ]);
+        expect(groups[0]?.primary).toBeUndefined();
+        expect(groups[0]?.latest?.id).toBe(7);
+      });
     });
   });
 });

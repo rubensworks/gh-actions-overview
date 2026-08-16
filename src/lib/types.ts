@@ -37,6 +37,7 @@ export interface IRepoRef {
    * The branch the repository considers its trunk, such as `master` or `main`.
    */
   defaultBranch: string;
+  stars: number;
   source: RepoSource;
 }
 
@@ -66,11 +67,16 @@ export interface IWorkflowGroup {
   runs: IWorkflowRun[];
   /**
    * The run that represents this workflow's status: the newest one on the repository's default
-   * branch. A run on a feature branch never displaces it, however recent it is. Only when the
-   * default branch has no run among those fetched does the newest run on any branch stand in.
-   * Undefined when the workflow has never run.
+   * branch. A run on a feature branch never displaces it, however recent it is. Undefined when
+   * the workflow has never run on the default branch, in which case nothing about this workflow
+   * is counted as failing or running — a side branch does not speak for the repository.
    */
   primary: IWorkflowRun | undefined;
+  /**
+   * The newest run on any branch, or undefined when the workflow has never run at all. Shown,
+   * greyed out, when there is no {@link primary} run to show instead.
+   */
+  latest: IWorkflowRun | undefined;
 }
 
 export interface IRepoState {
@@ -118,11 +124,28 @@ export type Theme = 'auto' | 'dark' | 'light';
  */
 export type TokenLocation = 'local' | 'none' | 'session';
 
+/**
+ * The order the repository rows are listed in.
+ */
+export type SortKey = 'default-run' | 'name' | 'pushed' | 'run' | 'stars' | 'status';
+
+export const SORT_LABELS: Record<SortKey, string> = {
+  pushed: 'Last push',
+  'default-run': 'Last default-branch run',
+  run: 'Last workflow run',
+  status: 'Failing first',
+  stars: 'Stars',
+  name: 'Name',
+};
+
+export const DEFAULT_SORT: SortKey = 'pushed';
+
 export interface IFilters {
   query: string;
   onlyFailures: boolean;
   onlyRunning: boolean;
   org: string;
+  sort: SortKey;
 }
 
 export interface IViewer {

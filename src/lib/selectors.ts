@@ -1,5 +1,5 @@
 import type { OverallStatus } from './favicon';
-import type { IFilters, IRepoState, IWorkflowGroup, IWorkflowRun } from './types';
+import type { IFilters, IRepoState, IWorkflowGroup, IWorkflowRun, SortKey } from './types';
 import { isActive } from './types';
 
 export interface ISummary {
@@ -32,6 +32,66 @@ function primaryRuns(workflows: IWorkflowGroup[]): IWorkflowRun[] {
     }
   }
   return runs;
+}
+
+// The newest moment among a set of runs, or -Infinity when there is none, so that repositories
+// with nothing to show sort to the bottom of every time-based order instead of to the top.
+function newestRun(runs: IWorkflowRun[]): number {
+  let newest = Number.NEGATIVE_INFINITY;
+  for (const run of runs) {
+    newest = Math.max(newest, Date.parse(run.createdAt));
+  }
+  return newest;
+}
+
+function lastDefaultBranchRun(repo: IRepoState): number {
+  return newestRun(primaryRuns(repo.workflows));
+}
+
+function lastRun(repo: IRepoState): number {
+  return newestRun(repo.workflows.flatMap(group => group.runs));
+}
+
+// Failing repositories first, then running ones, then everything else.
+function statusRank(repo: IRepoState): number {
+  const runs = primaryRuns(repo.workflows);
+  if (runs.some(run => run.state === 'failure')) {
+    return 0;
+  }
+  return runs.some(run => isActive(run.state)) ? 1 : 2;
+}
+
+function compareBy(sort: SortKey, left: IRepoState, right: IRepoState): number {
+  switch (sort) {
+    case 'name':
+      return left.repo.fullName.localeCompare(right.repo.fullName);
+    case 'stars':
+      return right.repo.stars - left.repo.stars;
+    case 'run':
+      return lastRun(right) - lastRun(left);
+    case 'default-run':
+      return lastDefaultBranchRun(right) - lastDefaultBranchRun(left);
+    case 'status':
+      return statusRank(left) - statusRank(right);
+    default:
+      return Date.parse(right.repo.pushedAt) - Date.parse(left.repo.pushedAt);
+  }
+}
+
+/**
+ * Orders repository rows, falling back to the most recent push whenever the chosen key ties.
+ * @param repos The repositories to order. Not modified.
+ * @param sort The chosen order.
+ */
+export function sortRepos(repos: IRepoState[], sort: SortKey): IRepoState[] {
+  return [ ...repos ].sort((left, right) => {
+    const primary = compareBy(sort, left, right);
+    if (primary !== 0) {
+      return primary;
+    }
+    const byPush = Date.parse(right.repo.pushedAt) - Date.parse(left.repo.pushedAt);
+    return byPush === 0 ? left.repo.fullName.localeCompare(right.repo.fullName) : byPush;
+  });
 }
 
 function matchesQuery(repo: IRepoState, needle: string): boolean {
@@ -74,7 +134,7 @@ export function summarize(repos: IRepoState[], filters: IFilters): ISummary {
   }
 
   const needle = filters.query.trim().toLowerCase();
-  const visible = repos.filter((repo) => {
+  const matching = repos.filter((repo) => {
     // Repositories without any workflow are never interesting on an Actions dashboard.
     if (repo.load === 'no-actions') {
       return false;
@@ -90,6 +150,7 @@ export function summarize(repos: IRepoState[], filters: IFilters): ISummary {
     }
     return needle.length === 0 || matchesQuery(repo, needle);
   });
+  const visible = sortRepos(matching, filters.sort);
 
   let overall: OverallStatus = 'idle';
   if (failureCount > 0) {

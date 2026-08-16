@@ -21,6 +21,7 @@ export function repoRef(fullName: string, overrides: Partial<IRepoRef> = {}): IR
     archived: false,
     pushedAt: '2026-05-01T11:00:00Z',
     defaultBranch: 'master',
+    stars: 0,
     source: 'user',
     ...overrides,
   };
@@ -52,7 +53,17 @@ export function workflowGroup(
   workflowId = 10,
   primary: IWorkflowRun | undefined = runs[0],
 ): IWorkflowGroup {
-  return { workflowId, name, runs, primary };
+  return { workflowId, name, runs, primary, latest: runs[0] };
+}
+
+/**
+ * A workflow that has runs, but none on the default branch, so nothing represents it.
+ * @param name The workflow name.
+ * @param runs Its runs, newest first.
+ * @param workflowId Its id.
+ */
+export function offTrunkGroup(name: string, runs: IWorkflowRun[], workflowId = 10): IWorkflowGroup {
+  return { workflowId, name, runs, primary: undefined, latest: runs[0] };
 }
 
 export function repoState(fullName: string, overrides: Partial<IRepoState> = {}): IRepoState {

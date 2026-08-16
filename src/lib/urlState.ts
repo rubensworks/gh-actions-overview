@@ -1,11 +1,17 @@
-import type { IFilters } from './types';
+import type { IFilters, SortKey } from './types';
+import { DEFAULT_SORT, SORT_LABELS } from './types';
 
 export const EMPTY_FILTERS: IFilters = {
   query: '',
   onlyFailures: false,
   onlyRunning: false,
   org: '',
+  sort: DEFAULT_SORT,
 };
+
+function readSort(value: string | null): SortKey {
+  return value !== null && value in SORT_LABELS ? <SortKey> value : DEFAULT_SORT;
+}
 
 // The whole view lives in the fragment, so it never reaches a server, not even in a request line.
 function parameters(hash: string): URLSearchParams {
@@ -31,6 +37,7 @@ export function readFilters(hash: string): IFilters {
     onlyFailures: parsed.get('failures') === '1',
     onlyRunning: parsed.get('running') === '1',
     org: parsed.get('org') ?? '',
+    sort: readSort(parsed.get('sort')),
   };
 }
 
@@ -55,6 +62,9 @@ export function toHash(owner: string, filters: IFilters): string {
   }
   if (filters.org.length > 0) {
     parsed.set('org', filters.org);
+  }
+  if (filters.sort !== DEFAULT_SORT) {
+    parsed.set('sort', filters.sort);
   }
   const serialized = parsed.toString();
   return serialized.length > 0 ? `#${serialized}` : '';

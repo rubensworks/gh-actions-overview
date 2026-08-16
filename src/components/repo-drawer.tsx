@@ -33,14 +33,25 @@ export function RepoDrawer({ repo, now, onClose }: IRepoDrawerProps) {
         <header className="drawer__header">
           <div>
             <h2 className="drawer__title">{repo.repo.fullName}</h2>
-            <a
-              className="link drawer__subtitle"
-              href={`${repo.repo.htmlUrl}/actions`}
-              target="_blank"
-              rel="noreferrer noopener"
-            >
-              Open Actions on github.com
-            </a>
+            <p className="drawer__subtitle">
+              <a
+                className="link"
+                href={repo.repo.htmlUrl}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                Open repository
+              </a>
+              {' · '}
+              <a
+                className="link"
+                href={`${repo.repo.htmlUrl}/actions`}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                Open Actions
+              </a>
+            </p>
           </div>
           <button className="button button--ghost" type="button" onClick={onClose} aria-label="Close">
             ✕
