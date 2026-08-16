@@ -43,6 +43,7 @@ jobs:
       - run: npm test
       - name: Submit coverage results
         uses: coverallsapp/github-action@v2
+        with:
           github-token: ${{ secrets.github_token }}
           flag-name: run-${{ matrix.node-version }}
           parallel: true
