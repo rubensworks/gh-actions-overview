@@ -144,11 +144,6 @@ is mocked at the module boundary for the client tests, and the polling store is 
 timers against a stub client, so the scheduler's 15-second, 2–5-minute, backoff and pause paths are
 all exercised deterministically. Components are rendered with `@testing-library/react` in jsdom.
 
-> **Note:** the CI and deployment workflows currently sit in
-> [`docs/workflows/`](docs/workflows/) and still have to be moved into `.github/workflows/`. See
-> [`docs/workflows/README.md`](docs/workflows/README.md) for why, and for the one command that does
-> it.
-
 ### Layout
 
 ```
