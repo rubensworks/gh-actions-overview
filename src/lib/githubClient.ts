@@ -179,6 +179,15 @@ function toRepoRef(repo: IApiRepo, source: RepoSource): IRepoRef {
   };
 }
 
+// Only the subject line of a commit message is shown on a run line.
+function firstCommitLine(commit: IApiCommit | null): string {
+  if (commit === null) {
+    return '';
+  }
+  const newline = commit.message.indexOf('\n');
+  return newline === -1 ? commit.message : commit.message.slice(0, newline);
+}
+
 function toWorkflowRun(run: IApiRun): IWorkflowRun {
   return {
     id: run.id,
@@ -189,7 +198,7 @@ function toWorkflowRun(run: IApiRun): IWorkflowRun {
     state: toRunState(run.status, run.conclusion),
     branch: run.head_branch ?? '(unknown)',
     event: run.event,
-    commitMessage: (run.head_commit?.message ?? '').split('\n')[0] ?? '',
+    commitMessage: firstCommitLine(run.head_commit),
     commitSha: run.head_sha,
     htmlUrl: run.html_url,
     createdAt: run.created_at,
@@ -302,8 +311,11 @@ export class GitHubClient {
       });
       const refs = data.map(repo => toRepoRef(repo, source));
       result.push(...refs);
-      const oldestOnPage = refs.at(-1);
-      if (data.length < 100 || (oldestOnPage !== undefined && Date.parse(oldestOnPage.pushedAt) < cutoff)) {
+      let oldestOnPage = Number.POSITIVE_INFINITY;
+      for (const ref of refs) {
+        oldestOnPage = Math.min(oldestOnPage, Date.parse(ref.pushedAt));
+      }
+      if (data.length < 100 || oldestOnPage < cutoff) {
         break;
       }
     }

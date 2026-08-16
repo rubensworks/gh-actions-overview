@@ -50,13 +50,13 @@ function ignoreRejection(): void {
 }
 
 function parseRepoEntry(entry: string): { owner: string; name: string } | undefined {
-  const parts = entry.trim().split('/');
-  const owner = parts[0];
-  const name = parts[1];
-  if (parts.length !== 2 || owner === undefined || name === undefined || owner === '' || name === '') {
+  const trimmed = entry.trim();
+  const slash = trimmed.indexOf('/');
+  // Exactly one slash, with something on either side of it.
+  if (slash <= 0 || slash !== trimmed.lastIndexOf('/') || slash === trimmed.length - 1) {
     return undefined;
   }
-  return { owner, name };
+  return { owner: trimmed.slice(0, slash), name: trimmed.slice(slash + 1) };
 }
 
 /**
@@ -187,7 +187,7 @@ export class DashboardStore {
       .sort((left, right) => left.nextRefresh - right.nextRefresh)
       .slice(0, slots);
     for (const repo of due) {
-      this.refreshRepo(repo.repo).catch(ignoreRejection);
+      this.refreshRepo(repo).catch(ignoreRejection);
     }
   }
 
@@ -278,13 +278,13 @@ export class DashboardStore {
     });
   }
 
-  private async refreshRepo(ref: IRepoRef): Promise<void> {
+  private async refreshRepo(current: IRepoState): Promise<void> {
+    const ref = current.repo;
     this.inFlight.add(ref.key);
     try {
-      const current = this.state.repos.find(repo => repo.repo.key === ref.key);
       const now = Date.now();
       let definitions = this.workflowDefinitions.get(ref.key);
-      let workflowsFetchedAt = current?.workflowsFetchedAt;
+      let workflowsFetchedAt = current.workflowsFetchedAt;
       const stale = workflowsFetchedAt === undefined || now - workflowsFetchedAt > WORKFLOW_LIST_REFRESH_MS;
       if (definitions === undefined || stale) {
         definitions = await this.client.listWorkflows(ref);

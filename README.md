@@ -124,12 +124,25 @@ Authenticated REST requests are limited to 5000 per hour. The dashboard keeps we
 npm install
 npm run dev        # Vite dev server
 npm run lint       # ESLint, using @rubensworks/eslint-config
+npm test           # Vitest, with coverage
+npm run test:watch # Vitest in watch mode
 npm run build      # Type-check and produce dist/
 npm run preview    # Serve the production build
 ```
 
-Both `npm run lint` and `npm run build` run on every push and pull request via
+`npm run lint`, `npm test` and `npm run build` all run on every push and pull request via
 [`ci.yml`](.github/workflows/ci.yml).
+
+### Tests
+
+The suite covers **100% of statements, branches, functions and lines**, and the coverage thresholds
+in [`vite.config.ts`](vite.config.ts) are set to 100, so CI fails the moment a line stops being
+covered.
+
+Tests live in `test/`, mirroring `src/`. There are no live network calls anywhere: `@octokit/rest`
+is mocked at the module boundary for the client tests, and the polling store is driven with fake
+timers against a stub client, so the scheduler's 15-second, 2–5-minute, backoff and pause paths are
+all exercised deterministically. Components are rendered with `@testing-library/react` in jsdom.
 
 > **Note:** the CI and deployment workflows currently sit in
 > [`docs/workflows/`](docs/workflows/) and still have to be moved into `.github/workflows/`. See
@@ -139,6 +152,7 @@ Both `npm run lint` and `npm run build` run on every push and pull request via
 ### Layout
 
 ```
+test/                      Vitest suites, mirroring src/
 src/
   app.tsx                  Session and settings ownership
   components/              Presentational React components
