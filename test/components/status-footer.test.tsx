@@ -2,6 +2,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { StatusFooter } from '../../src/components/status-footer';
 import { INITIAL_STATE } from '../../src/lib/dashboardStore';
+import { SOURCE_URL } from '../../src/lib/links';
 import type { IDashboardState } from '../../src/lib/types';
 import { NOW } from '../fixtures';
 
@@ -97,6 +98,22 @@ describe('StatusFooter', () => {
     it('shows the repository list error', () => {
       renderFooter({ repoListError: 'ghost: Not found' });
       expect(screen.getByText('ghost: Not found')).toBeDefined();
+    });
+  });
+
+  describe('source link', () => {
+    it('links to the repository in a new tab', () => {
+      const container = renderFooter();
+      const link = container.querySelector<HTMLAnchorElement>('.footer__source');
+      expect(link?.getAttribute('href')).toBe(SOURCE_URL);
+      expect(link?.getAttribute('target')).toBe('_blank');
+      expect(link?.getAttribute('rel')).toBe('noreferrer noopener');
+      expect(link?.textContent).toBe('source');
+    });
+
+    it('is there whatever the polling state is', () => {
+      const container = renderFooter({ paused: true, repoListError: 'boom' }, 3);
+      expect(container.querySelector('.footer__source')).not.toBeNull();
     });
   });
 

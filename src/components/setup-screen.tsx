@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { SOURCE_URL } from '../lib/links';
 
 const TOKEN_URL = 'https://github.com/settings/personal-access-tokens/new';
 
@@ -53,7 +54,10 @@ export function SetupScreen({ onConnect, onBrowse, initialError }: ISetupScreenP
         <p className="setup__lead">
           A dashboard for all your GitHub Actions, in the spirit of the old Travis CI overview.
           Everything runs in this browser tab — there is no server, and the only host this page ever
-          talks to is <code>api.github.com</code>.
+          talks to is <code>api.github.com</code>. Don&apos;t take our word for it:{' '}
+          <a className="link" href={SOURCE_URL} target="_blank" rel="noreferrer noopener">
+            read the source
+          </a>.
         </p>
 
         <form className="setup__form" onSubmit={submit}>
@@ -151,6 +155,13 @@ export function SetupScreen({ onConnect, onBrowse, initialError }: ISetupScreenP
             ever contacted. “Sign out” wipes it from both storages.
           </p>
         </section>
+
+        <footer className="setup__footer">
+          <a className="link" href={SOURCE_URL} target="_blank" rel="noreferrer noopener">
+            rubensworks/gh-actions-overview
+          </a>
+          {' '}— MIT licensed, and open to issues and pull requests.
+        </footer>
       </div>
     </div>
   );
