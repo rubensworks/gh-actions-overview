@@ -1,60 +1,92 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { IFilters } from '../src/lib/types';
-import { EMPTY_FILTERS, filtersToSearch, readFilters, writeFiltersToUrl } from '../src/lib/urlState';
+import { EMPTY_FILTERS, readFilters, readOwner, toHash, writeUrlState } from '../src/lib/urlState';
 
 const FULL: IFilters = { query: 'rdf', onlyFailures: true, onlyRunning: true, org: 'comunica' };
 
+describe('readOwner', () => {
+  it('is empty when the fragment names no owner', () => {
+    expect(readOwner('')).toBe('');
+    expect(readOwner('#q=rdf')).toBe('');
+  });
+
+  it('reads the owner', () => {
+    expect(readOwner('#owner=comunica')).toBe('comunica');
+  });
+
+  it('accepts a fragment without its leading hash', () => {
+    expect(readOwner('owner=comunica')).toBe('comunica');
+  });
+});
+
 describe('readFilters', () => {
-  it('falls back to empty filters for an empty query string', () => {
+  it('falls back to empty filters for an empty fragment', () => {
     expect(readFilters('')).toEqual(EMPTY_FILTERS);
   });
 
   it('reads every filter', () => {
-    expect(readFilters('?q=rdf&failures=1&running=1&org=comunica')).toEqual(FULL);
+    expect(readFilters('#q=rdf&failures=1&running=1&org=comunica')).toEqual(FULL);
   });
 
   it('treats any value other than 1 as off', () => {
-    expect(readFilters('?failures=0&running=yes')).toEqual(EMPTY_FILTERS);
+    expect(readFilters('#failures=0&running=yes')).toEqual(EMPTY_FILTERS);
+  });
+
+  it('ignores the owner', () => {
+    expect(readFilters('#owner=comunica')).toEqual(EMPTY_FILTERS);
   });
 });
 
-describe('filtersToSearch', () => {
-  it('omits defaults entirely', () => {
-    expect(filtersToSearch(EMPTY_FILTERS)).toBe('');
+describe('toHash', () => {
+  it('is empty when everything is at its default', () => {
+    expect(toHash('', EMPTY_FILTERS)).toBe('');
   });
 
-  it('serializes every filter', () => {
-    expect(filtersToSearch(FULL)).toBe('?q=rdf&failures=1&running=1&org=comunica');
+  it('serializes the owner and every filter', () => {
+    expect(toHash('comunica', FULL)).toBe('#owner=comunica&q=rdf&failures=1&running=1&org=comunica');
+  });
+
+  it('serializes an owner on its own', () => {
+    expect(toHash('comunica', EMPTY_FILTERS)).toBe('#owner=comunica');
   });
 
   it('round-trips', () => {
-    expect(readFilters(filtersToSearch(FULL))).toEqual(FULL);
+    const hash = toHash('comunica', FULL);
+    expect(readOwner(hash)).toBe('comunica');
+    expect(readFilters(hash)).toEqual(FULL);
   });
 });
 
-describe('writeFiltersToUrl', () => {
+describe('writeUrlState', () => {
   beforeEach(() => {
     history.replaceState(null, '', '/dashboard');
   });
 
-  it('writes the filters into the address bar', () => {
-    writeFiltersToUrl(FULL);
-    expect(location.search).toBe('?q=rdf&failures=1&running=1&org=comunica');
+  it('writes the view into the fragment, never the query string', () => {
+    writeUrlState('comunica', FULL);
+    expect(location.hash).toBe('#owner=comunica&q=rdf&failures=1&running=1&org=comunica');
+    expect(location.search).toBe('');
     expect(location.pathname).toBe('/dashboard');
   });
 
-  it('preserves the hash', () => {
-    history.replaceState(null, '', '/dashboard#top');
-    writeFiltersToUrl({ ...EMPTY_FILTERS, query: 'x' });
-    expect(location.hash).toBe('#top');
-    expect(location.search).toBe('?q=x');
+  it('preserves an existing query string', () => {
+    history.replaceState(null, '', '/dashboard?utm=x');
+    writeUrlState('', { ...EMPTY_FILTERS, query: 'rdf' });
+    expect(location.search).toBe('?utm=x');
+    expect(location.hash).toBe('#q=rdf');
+  });
+
+  it('drops the fragment entirely once nothing is set', () => {
+    writeUrlState('', FULL);
+    writeUrlState('', EMPTY_FILTERS);
+    expect(location.hash).toBe('');
   });
 
   it('does not touch history when the URL already matches', () => {
-    writeFiltersToUrl(FULL);
+    writeUrlState('comunica', FULL);
     const before = history.length;
-    writeFiltersToUrl(FULL);
+    writeUrlState('comunica', FULL);
     expect(history.length).toBe(before);
-    expect(location.search).toBe('?q=rdf&failures=1&running=1&org=comunica');
+    expect(location.hash).toBe('#owner=comunica&q=rdf&failures=1&running=1&org=comunica');
   });
 });

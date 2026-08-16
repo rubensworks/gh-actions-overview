@@ -7,48 +7,66 @@ export const EMPTY_FILTERS: IFilters = {
   org: '',
 };
 
+// The whole view lives in the fragment, so it never reaches a server, not even in a request line.
+function parameters(hash: string): URLSearchParams {
+  return new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
+}
+
 /**
- * Reads the filter state from a URL query string.
- * @param search A query string, including the leading question mark.
+ * Reads the owner the dashboard is scoped to, if the URL names one.
+ * @param hash A URL fragment, with or without its leading hash.
  */
-export function readFilters(search: string): IFilters {
-  const parameters = new URLSearchParams(search);
+export function readOwner(hash: string): string {
+  return parameters(hash).get('owner') ?? '';
+}
+
+/**
+ * Reads the filter state from a URL fragment.
+ * @param hash A URL fragment, with or without its leading hash.
+ */
+export function readFilters(hash: string): IFilters {
+  const parsed = parameters(hash);
   return {
-    query: parameters.get('q') ?? '',
-    onlyFailures: parameters.get('failures') === '1',
-    onlyRunning: parameters.get('running') === '1',
-    org: parameters.get('org') ?? '',
+    query: parsed.get('q') ?? '',
+    onlyFailures: parsed.get('failures') === '1',
+    onlyRunning: parsed.get('running') === '1',
+    org: parsed.get('org') ?? '',
   };
 }
 
 /**
- * Serializes the filter state into a query string, omitting everything that is at its default.
+ * Serializes the view into a URL fragment, omitting everything that is at its default.
+ * @param owner The owner the dashboard is scoped to, or an empty string.
  * @param filters The current filters.
  */
-export function filtersToSearch(filters: IFilters): string {
-  const parameters = new URLSearchParams();
+export function toHash(owner: string, filters: IFilters): string {
+  const parsed = new URLSearchParams();
+  if (owner.length > 0) {
+    parsed.set('owner', owner);
+  }
   if (filters.query.length > 0) {
-    parameters.set('q', filters.query);
+    parsed.set('q', filters.query);
   }
   if (filters.onlyFailures) {
-    parameters.set('failures', '1');
+    parsed.set('failures', '1');
   }
   if (filters.onlyRunning) {
-    parameters.set('running', '1');
+    parsed.set('running', '1');
   }
   if (filters.org.length > 0) {
-    parameters.set('org', filters.org);
+    parsed.set('org', filters.org);
   }
-  const serialized = parameters.toString();
-  return serialized.length > 0 ? `?${serialized}` : '';
+  const serialized = parsed.toString();
+  return serialized.length > 0 ? `#${serialized}` : '';
 }
 
 /**
- * Writes the filter state into the address bar without adding a history entry.
+ * Writes the view into the address bar without adding a history entry.
+ * @param owner The owner the dashboard is scoped to, or an empty string.
  * @param filters The current filters.
  */
-export function writeFiltersToUrl(filters: IFilters): void {
-  const target = `${location.pathname}${filtersToSearch(filters)}${location.hash}`;
+export function writeUrlState(owner: string, filters: IFilters): void {
+  const target = `${location.pathname}${location.search}${toHash(owner, filters)}`;
   if (target !== `${location.pathname}${location.search}${location.hash}`) {
     history.replaceState(null, '', target);
   }

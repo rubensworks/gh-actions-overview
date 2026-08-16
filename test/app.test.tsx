@@ -26,18 +26,20 @@ vi.mock('../src/lib/githubClient', async(importOriginal) => {
 // The dashboard itself is covered by its own suite; here it only has to expose its callbacks.
 vi.mock('../src/components/dashboard', () => ({
   Dashboard: (props: {
-    viewer: IViewer;
+    viewer: IViewer | undefined;
+    owner: string | undefined;
     settings: ISettings;
     onSettingsChange: (settings: ISettings) => void;
-    onSignOut: () => void;
+    onLeave: () => void;
   }) => (
     <div>
-      <span>signed in as {props.viewer.login}</span>
+      <span>signed in as {props.viewer?.login ?? 'nobody'}</span>
+      <span>scoped to {props.owner ?? 'everything'}</span>
       <span>window {props.settings.windowDays}</span>
       <button type="button" onClick={() => props.onSettingsChange({ ...props.settings, windowDays: 7 })}>
         narrow
       </button>
-      <button type="button" onClick={props.onSignOut}>leave</button>
+      <button type="button" onClick={props.onLeave}>leave</button>
     </div>
   ),
 }));
@@ -45,6 +47,7 @@ vi.mock('../src/components/dashboard', () => ({
 const TOKEN_KEY = 'gh-actions-overview:token';
 
 beforeEach(() => {
+  history.replaceState(null, '', '/');
   localStorage.clear();
   sessionStorage.clear();
   getViewerMock.mockReset();
@@ -166,6 +169,55 @@ describe('App', () => {
     fail();
     await waitFor(() => expect(getViewerMock).toHaveBeenCalled());
     expect(localStorage.getItem(TOKEN_KEY)).toBe('stored');
+  });
+
+  describe('browsing without a token', () => {
+    it('goes straight to the dashboard when the fragment names an owner', async() => {
+      history.replaceState(null, '', '/#owner=comunica');
+      render(<App />);
+      await waitFor(() => expect(screen.getByText('scoped to comunica')).toBeDefined());
+      expect(screen.getByText('signed in as nobody')).toBeDefined();
+      expect(getViewerMock).not.toHaveBeenCalled();
+    });
+
+    it('starts browsing from the setup screen', async() => {
+      render(<App />);
+      await waitFor(() => expect(screen.getByPlaceholderText('comunica')).toBeDefined());
+      fireEvent.change(screen.getByPlaceholderText('comunica'), { target: { value: 'comunica' }});
+      fireEvent.click(screen.getByText('Browse'));
+      await waitFor(() => expect(screen.getByText('scoped to comunica')).toBeDefined());
+      expect(location.hash).toBe('#owner=comunica');
+    });
+
+    it('leaves back to the setup screen and clears the fragment', async() => {
+      history.replaceState(null, '', '/#owner=comunica');
+      render(<App />);
+      await waitFor(() => expect(screen.getByText('leave')).toBeDefined());
+      fireEvent.click(screen.getByText('leave'));
+      expect(screen.getByText('Fine-grained personal access token')).toBeDefined();
+      expect(location.hash).toBe('');
+    });
+
+    it('uses the stored token for an owner named in the fragment', async() => {
+      history.replaceState(null, '', '/#owner=comunica');
+      localStorage.setItem(TOKEN_KEY, 'stored');
+      render(<App />);
+      await waitFor(() => expect(screen.getByText('signed in as rubensworks')).toBeDefined());
+      expect(screen.getByText('scoped to comunica')).toBeDefined();
+    });
+
+    it('scopes a freshly pasted token to the owner in the fragment', async() => {
+      // Reached by opening a shared link while holding a token the API has since rejected.
+      history.replaceState(null, '', '/#owner=comunica');
+      localStorage.setItem(TOKEN_KEY, 'stale');
+      getViewerMock.mockRejectedValueOnce(Object.assign(new Error('Bad credentials'), { status: 401 }));
+      render(<App />);
+      await waitFor(() => expect(screen.getByPlaceholderText('github_pat_...')).toBeDefined());
+      fireEvent.change(screen.getByPlaceholderText('github_pat_...'), { target: { value: 'fresh' }});
+      fireEvent.click(screen.getByText('Connect'));
+      await waitFor(() => expect(screen.getByText('signed in as rubensworks')).toBeDefined());
+      expect(screen.getByText('scoped to comunica')).toBeDefined();
+    });
   });
 
   it('is constructed with the token the user pasted', async() => {

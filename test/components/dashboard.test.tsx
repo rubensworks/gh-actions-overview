@@ -27,6 +27,7 @@ const { FakeStore } = vi.hoisted(() => {
     public readonly calls: string[] = [];
     public readonly appliedSettings: ISettings[] = [];
     public readonly onFailure: (event: IFailureEvent) => void;
+    public readonly scope: { owner: string | undefined; anonymous: boolean };
     private state: IDashboardState = initial;
     private readonly listeners = new Set<() => void>();
 
@@ -34,9 +35,11 @@ const { FakeStore } = vi.hoisted(() => {
       _client: GitHubClient,
       initialSettings: ISettings,
       onFailure: (event: IFailureEvent) => void,
+      scope: { owner: string | undefined; anonymous: boolean },
     ) {
       this.onFailure = onFailure;
       this.appliedSettings.push(initialSettings);
+      this.scope = scope;
       FakeStoreImpl.last = this;
     }
 
@@ -94,23 +97,30 @@ const notifyMock = vi.mocked(notifyFailure);
 
 const VIEWER: IViewer = { login: 'rubensworks', name: 'Ruben Taelman', avatarUrl: 'https://a/x.png' };
 
-function renderDashboard(overrides: Partial<ISettings> = {}): {
+interface IRenderOptions {
+  settings?: Partial<ISettings>;
+  viewer?: IViewer | undefined;
+  owner?: string | undefined;
+}
+
+function renderDashboard(options: IRenderOptions = {}): {
   onSettingsChange: ReturnType<typeof vi.fn>;
-  onSignOut: ReturnType<typeof vi.fn>;
+  onLeave: ReturnType<typeof vi.fn>;
   store: () => FakeStoreInstance;
 } {
   const onSettingsChange = vi.fn();
-  const onSignOut = vi.fn();
+  const onLeave = vi.fn();
   render(
     <Dashboard
       client={{} as unknown as GitHubClient}
-      viewer={VIEWER}
-      settings={settings(overrides)}
+      viewer={'viewer' in options ? options.viewer : VIEWER}
+      owner={options.owner}
+      settings={settings(options.settings)}
       onSettingsChange={onSettingsChange}
-      onSignOut={onSignOut}
+      onLeave={onLeave}
     />,
   );
-  return { onSettingsChange, onSignOut, store: () => FakeStore.last! };
+  return { onSettingsChange, onLeave, store: () => FakeStore.last! };
 }
 
 // The repository names shown in the rows, which is what the filters act on.
@@ -178,9 +188,49 @@ describe('Dashboard', () => {
   });
 
   it('signs out', () => {
-    const { onSignOut } = renderDashboard();
+    const { onLeave } = renderDashboard();
     fireEvent.click(screen.getByText('Sign out'));
-    expect(onSignOut).toHaveBeenCalledTimes(1);
+    expect(onLeave).toHaveBeenCalledTimes(1);
+  });
+
+  describe('without a token', () => {
+    it('shows the owner being browsed instead of a viewer', () => {
+      renderDashboard({ viewer: undefined, owner: 'comunica' });
+      expect(screen.getByText('public')).toBeDefined();
+      expect(screen.getByText('comunica')).toBeDefined();
+      expect(screen.queryByAltText('')).toBeNull();
+    });
+
+    it('offers a way back to the token screen', () => {
+      const { onLeave } = renderDashboard({ viewer: undefined, owner: 'comunica' });
+      fireEvent.click(screen.getByText('Use a token'));
+      expect(onLeave).toHaveBeenCalledTimes(1);
+    });
+
+    it('tells the store it is anonymous and scoped', () => {
+      const { store } = renderDashboard({ viewer: undefined, owner: 'comunica' });
+      expect(store().scope).toEqual({ owner: 'comunica', anonymous: true });
+    });
+  });
+
+  describe('signed in and scoped to an owner', () => {
+    it('shows both the viewer and the owner', () => {
+      renderDashboard({ owner: 'comunica' });
+      expect(screen.getByText('rubensworks')).toBeDefined();
+      expect(screen.getByText('comunica')).toBeDefined();
+    });
+
+    it('tells the store it is scoped but not anonymous', () => {
+      const { store } = renderDashboard({ owner: 'comunica' });
+      expect(store().scope).toEqual({ owner: 'comunica', anonymous: false });
+    });
+
+    it('keeps the owner in the fragment when filters change', () => {
+      const { store } = renderDashboard({ owner: 'comunica' });
+      load(store());
+      fireEvent.change(screen.getByPlaceholderText(/Search repository/u), { target: { value: 'jbr' }});
+      expect(location.hash).toBe('#owner=comunica&q=jbr');
+    });
   });
 
   it('pushes new settings into the store', () => {
@@ -223,18 +273,19 @@ describe('Dashboard', () => {
   });
 
   describe('filters', () => {
-    it('starts from the query string', () => {
-      history.replaceState(null, '', '/?failures=1');
+    it('starts from the fragment', () => {
+      history.replaceState(null, '', '/#failures=1');
       const { store } = renderDashboard();
       load(store());
       expect(rows()).toEqual([ 'jbr.js' ]);
     });
 
-    it('writes changes back to the query string', () => {
+    it('writes changes back to the fragment, not the query string', () => {
       const { store } = renderDashboard();
       load(store());
       fireEvent.change(screen.getByPlaceholderText(/Search repository/u), { target: { value: 'jbr' }});
-      expect(location.search).toBe('?q=jbr');
+      expect(location.hash).toBe('#q=jbr');
+      expect(location.search).toBe('');
       expect(rows()).toEqual([ 'jbr.js' ]);
     });
   });
@@ -255,13 +306,13 @@ describe('Dashboard', () => {
 
   describe('failure notifications', () => {
     it('stay quiet while the setting is off', () => {
-      const { store } = renderDashboard({ notifyOnFailure: false });
+      const { store } = renderDashboard({ settings: { notifyOnFailure: false }});
       store().onFailure({ repoFullName: 'a/b', workflowName: 'CI', url: 'https://example.org' });
       expect(notifyMock).not.toHaveBeenCalled();
     });
 
     it('fire while the setting is on', () => {
-      const { store } = renderDashboard({ notifyOnFailure: true });
+      const { store } = renderDashboard({ settings: { notifyOnFailure: true }});
       store().onFailure({ repoFullName: 'a/b', workflowName: 'CI', url: 'https://example.org' });
       expect(notifyMock).toHaveBeenCalledWith('a/b', 'CI', 'https://example.org');
     });

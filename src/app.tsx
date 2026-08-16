@@ -4,14 +4,26 @@ import { SetupScreen } from './components/setup-screen';
 import { GitHubClient, describeError } from './lib/githubClient';
 import { clearToken, loadSettings, loadToken, saveSettings, saveToken } from './lib/storage';
 import type { ISettings, IViewer } from './lib/types';
+import { readOwner, writeUrlState } from './lib/urlState';
 
 interface ISession {
   client: GitHubClient;
-  viewer: IViewer;
+  /**
+   * The authenticated user, or undefined when browsing public data without a token.
+   */
+  viewer: IViewer | undefined;
+  /**
+   * A user or organisation the dashboard is scoped to, or undefined for "my repositories".
+   */
+  owner: string | undefined;
 }
 
 /**
- * The application root: owns the token session and the persisted settings.
+ * The application root: owns the session and the persisted settings.
+ *
+ * A session is either authenticated with a token, or anonymous and scoped to one owner. The
+ * fragment can scope an authenticated session to an owner too, which is how a shared link keeps
+ * working for someone who does have a token.
  */
 export function App() {
   const [ settings, setSettings ] = useState<ISettings>(() => loadSettings());
@@ -33,12 +45,22 @@ export function App() {
     }
     saveToken(token, remember);
     setAuthError(undefined);
-    setSession({ client, viewer });
+    setSession({ client, viewer, owner: readOwner(location.hash) || undefined });
+  }, []);
+
+  const browse = useCallback((owner: string) => {
+    setAuthError(undefined);
+    writeUrlState(owner, { query: '', onlyFailures: false, onlyRunning: false, org: '' });
+    setSession({ client: new GitHubClient(undefined), viewer: undefined, owner });
   }, []);
 
   useEffect(() => {
+    const owner = readOwner(location.hash);
     const stored = loadToken();
     if (stored === undefined) {
+      if (owner.length > 0) {
+        setSession({ client: new GitHubClient(undefined), viewer: undefined, owner });
+      }
       setBooting(false);
       return;
     }
@@ -47,7 +69,7 @@ export function App() {
     client.getViewer()
       .then((viewer) => {
         if (!cancelled) {
-          setSession({ client, viewer });
+          setSession({ client, viewer, owner: owner.length > 0 ? owner : undefined });
         }
       })
       .catch((error: unknown) => {
@@ -71,8 +93,9 @@ export function App() {
     setSettings(next);
   }, []);
 
-  const signOut = useCallback(() => {
+  const leave = useCallback(() => {
     clearToken();
+    writeUrlState('', { query: '', onlyFailures: false, onlyRunning: false, org: '' });
     setSession(undefined);
     setAuthError(undefined);
   }, []);
@@ -82,16 +105,17 @@ export function App() {
   }
 
   if (session === undefined) {
-    return <SetupScreen onConnect={connect} initialError={authError} />;
+    return <SetupScreen onConnect={connect} onBrowse={browse} initialError={authError} />;
   }
 
   return (
     <Dashboard
       client={session.client}
       viewer={session.viewer}
+      owner={session.owner}
       settings={settings}
       onSettingsChange={updateSettings}
-      onSignOut={signOut}
+      onLeave={leave}
     />
   );
 }

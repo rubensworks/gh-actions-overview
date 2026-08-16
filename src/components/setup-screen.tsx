@@ -4,17 +4,19 @@ const TOKEN_URL = 'https://github.com/settings/personal-access-tokens/new';
 
 export interface ISetupScreenProps {
   onConnect: (token: string, remember: boolean) => Promise<void>;
+  onBrowse: (owner: string) => void;
   initialError: string | undefined;
 }
 
 /**
  * The first-run screen where the user pastes a personal access token.
  */
-export function SetupScreen({ onConnect, initialError }: ISetupScreenProps) {
+export function SetupScreen({ onConnect, onBrowse, initialError }: ISetupScreenProps) {
   const [ token, setToken ] = useState('');
   const [ remember, setRemember ] = useState(true);
   const [ busy, setBusy ] = useState(false);
   const [ error, setError ] = useState<string | undefined>(initialError);
+  const [ owner, setOwner ] = useState('');
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -32,6 +34,16 @@ export function SetupScreen({ onConnect, initialError }: ISetupScreenProps) {
     } finally {
       setBusy(false);
     }
+  }
+
+  function browse(event: React.FormEvent) {
+    event.preventDefault();
+    const trimmed = owner.trim().replace(/^@/u, '');
+    if (trimmed.length === 0) {
+      setError('Enter a user or organisation first.');
+      return;
+    }
+    onBrowse(trimmed);
   }
 
   return (
@@ -74,6 +86,31 @@ export function SetupScreen({ onConnect, initialError }: ISetupScreenProps) {
           <button className="button button--primary" type="submit" disabled={busy}>
             {busy ? 'Checking token…' : 'Connect'}
           </button>
+        </form>
+
+        <div className="setup__divider"><span>or</span></div>
+
+        <form className="setup__form" onSubmit={browse}>
+          <label className="setup__label" htmlFor="owner">Browse a public user or organisation</label>
+          <p className="setup__hint">
+            No token, no sign-in: this reads the public Actions data of everything that account owns.
+            GitHub allows 60 anonymous requests an hour per IP address, so this shows the 15 most
+            recently pushed repositories and refreshes them more slowly.
+          </p>
+          <div className="setup__row">
+            <input
+              id="owner"
+              className="setup__input"
+              type="text"
+              autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              placeholder="comunica"
+              value={owner}
+              onChange={event => setOwner(event.target.value)}
+            />
+            <button className="button" type="submit">Browse</button>
+          </div>
         </form>
 
         <section className="setup__section">

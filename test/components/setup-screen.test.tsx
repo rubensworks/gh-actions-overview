@@ -8,11 +8,20 @@ function noConnect(): Promise<void> {
   return Promise.resolve();
 }
 
+let browsed: string[] = [];
+
 function renderSetup(
   onConnect: (token: string, remember: boolean) => Promise<void> = noConnect,
   initialError?: string,
 ): HTMLInputElement {
-  render(<SetupScreen onConnect={onConnect} initialError={initialError} />);
+  browsed = [];
+  render(
+    <SetupScreen
+      onConnect={onConnect}
+      onBrowse={owner => browsed.push(owner)}
+      initialError={initialError}
+    />,
+  );
   return screen.getByPlaceholderText('github_pat_...');
 }
 
@@ -96,6 +105,34 @@ describe('SetupScreen', () => {
     fireEvent.click(screen.getByText('Connect'));
     await waitFor(() =>
       expect(screen.getByRole('alert').textContent).toBe('Token is invalid or expired'));
+  });
+
+  describe('browsing without a token', () => {
+    it('reports the owner that was entered', () => {
+      renderSetup();
+      fireEvent.change(screen.getByPlaceholderText('comunica'), { target: { value: 'comunica' }});
+      fireEvent.click(screen.getByText('Browse'));
+      expect(browsed).toEqual([ 'comunica' ]);
+    });
+
+    it('trims whitespace and a leading at-sign', () => {
+      renderSetup();
+      fireEvent.change(screen.getByPlaceholderText('comunica'), { target: { value: '  @rubensworks ' }});
+      fireEvent.click(screen.getByText('Browse'));
+      expect(browsed).toEqual([ 'rubensworks' ]);
+    });
+
+    it('refuses an empty owner', () => {
+      renderSetup();
+      fireEvent.click(screen.getByText('Browse'));
+      expect(browsed).toEqual([]);
+      expect(screen.getByRole('alert').textContent).toBe('Enter a user or organisation first.');
+    });
+
+    it('explains the anonymous rate limit', () => {
+      renderSetup();
+      expect(screen.getByText(/60 anonymous requests an hour/u)).toBeDefined();
+    });
   });
 
   it('reports a non-Error rejection', async() => {
