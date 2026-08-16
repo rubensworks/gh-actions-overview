@@ -1,0 +1,124 @@
+import type { ISettings, Theme } from './types';
+
+const TOKEN_KEY = 'gh-actions-overview:token';
+const SETTINGS_KEY = 'gh-actions-overview:settings';
+
+export const DEFAULT_SETTINGS: ISettings = {
+  windowDays: 30,
+  orgs: [],
+  extraRepos: [],
+  notifyOnFailure: false,
+  includeArchived: false,
+  theme: 'auto',
+};
+
+// Storage access throws in some privacy modes, so every access is guarded.
+function safeRead(storage: Storage, key: string): string | undefined {
+  try {
+    return storage.getItem(key) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function safeWrite(storage: Storage, key: string, value: string): void {
+  try {
+    storage.setItem(key, value);
+  } catch {
+    // Nothing sensible to do when storage is unavailable or full; the app keeps working in memory.
+  }
+}
+
+function safeRemove(storage: Storage, key: string): void {
+  try {
+    storage.removeItem(key);
+  } catch {
+    // See safeWrite.
+  }
+}
+
+export interface IStoredToken {
+  token: string;
+  remembered: boolean;
+}
+
+/**
+ * Reads the personal access token from session storage first, then from local storage.
+ */
+export function loadToken(): IStoredToken | undefined {
+  const sessionToken = safeRead(sessionStorage, TOKEN_KEY);
+  if (sessionToken !== undefined && sessionToken.length > 0) {
+    return { token: sessionToken, remembered: false };
+  }
+  const localToken = safeRead(localStorage, TOKEN_KEY);
+  if (localToken !== undefined && localToken.length > 0) {
+    return { token: localToken, remembered: true };
+  }
+  return undefined;
+}
+
+/**
+ * Persists the token, either for this browser or only for this tab session.
+ * @param token A GitHub personal access token.
+ * @param remember Whether to keep the token in local storage across browser restarts.
+ */
+export function saveToken(token: string, remember: boolean): void {
+  clearToken();
+  safeWrite(remember ? localStorage : sessionStorage, TOKEN_KEY, token);
+}
+
+/**
+ * Removes the token from both storages.
+ */
+export function clearToken(): void {
+  safeRemove(localStorage, TOKEN_KEY);
+  safeRemove(sessionStorage, TOKEN_KEY);
+}
+
+function toStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  return value.filter((entry): entry is string => typeof entry === 'string');
+}
+
+function toTheme(value: unknown): Theme | undefined {
+  return value === 'auto' || value === 'dark' || value === 'light' ? value : undefined;
+}
+
+/**
+ * Reads the persisted settings, falling back to the defaults for anything missing or malformed.
+ */
+export function loadSettings(): ISettings {
+  const raw = safeRead(localStorage, SETTINGS_KEY);
+  if (raw === undefined) {
+    return DEFAULT_SETTINGS;
+  }
+  let parsed: unknown;
+  try {
+    parsed = <unknown> JSON.parse(raw);
+  } catch {
+    return DEFAULT_SETTINGS;
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    return DEFAULT_SETTINGS;
+  }
+  const record = <Record<string, unknown>> parsed;
+  const windowDays = Number(record.windowDays);
+  return {
+    windowDays: Number.isFinite(windowDays) && windowDays > 0 ? Math.trunc(windowDays) : DEFAULT_SETTINGS.windowDays,
+    orgs: toStringArray(record.orgs) ?? DEFAULT_SETTINGS.orgs,
+    extraRepos: toStringArray(record.extraRepos) ?? DEFAULT_SETTINGS.extraRepos,
+    notifyOnFailure: record.notifyOnFailure === true,
+    includeArchived: record.includeArchived === true,
+    theme: toTheme(record.theme) ?? DEFAULT_SETTINGS.theme,
+  };
+}
+
+/**
+ * Persists the settings.
+ * @param settings The settings to store.
+ */
+export function saveSettings(settings: ISettings): void {
+  safeWrite(localStorage, SETTINGS_KEY, JSON.stringify(settings));
+}

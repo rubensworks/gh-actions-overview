@@ -1,0 +1,31 @@
+{
+  "name": "gh-actions-overview",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A client-side-only GitHub Actions dashboard, in the spirit of the old Travis CI overview.",
+  "author": "Ruben Taelman <rubensworks@gmail.com>",
+  "license": "MIT",
+  "repository": "git@github.com:rubensworks/gh-actions-overview.git",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --cache",
+    "lint:fix": "eslint . --cache --fix"
+  },
+  "dependencies": {
+    "@octokit/rest": "^21.1.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@rubensworks/eslint-config": "^3.1.0",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "eslint": "^8.57.1",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.11"
+  }
+}
