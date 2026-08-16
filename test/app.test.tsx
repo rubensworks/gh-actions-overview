@@ -23,22 +23,45 @@ vi.mock('../src/lib/githubClient', async(importOriginal) => {
   };
 });
 
+// The real settings panel awaits onTokenSave inside a try/catch, so the stand-in has to swallow a
+// rejection too. Leaving it to float would fail the run as an unhandled rejection.
+function save(
+  onTokenSave: (token: string, remember: boolean) => Promise<void>,
+  token: string,
+  remember: boolean,
+): void {
+  onTokenSave(token, remember).catch(() => {
+    // Swallowed exactly as the real settings panel swallows it.
+  });
+}
+
 // The dashboard itself is covered by its own suite; here it only has to expose its callbacks.
 vi.mock('../src/components/dashboard', () => ({
   Dashboard: (props: {
     viewer: IViewer | undefined;
     owner: string | undefined;
     settings: ISettings;
+    tokenLocation: string;
     onSettingsChange: (settings: ISettings) => void;
+    onTokenSave: (token: string, remember: boolean) => Promise<void>;
+    onTokenRemove: () => void;
     onLeave: () => void;
   }) => (
     <div>
       <span>signed in as {props.viewer?.login ?? 'nobody'}</span>
       <span>scoped to {props.owner ?? 'everything'}</span>
       <span>window {props.settings.windowDays}</span>
+      <span>token {props.tokenLocation}</span>
       <button type="button" onClick={() => props.onSettingsChange({ ...props.settings, windowDays: 7 })}>
         narrow
       </button>
+      <button type="button" onClick={() => save(props.onTokenSave, 'replacement', false)}>
+        swap token
+      </button>
+      <button type="button" onClick={() => save(props.onTokenSave, 'remembered', true)}>
+        swap token kept
+      </button>
+      <button type="button" onClick={props.onTokenRemove}>drop token</button>
       <button type="button" onClick={props.onLeave}>leave</button>
     </div>
   ),
@@ -217,6 +240,73 @@ describe('App', () => {
       fireEvent.click(screen.getByText('Connect'));
       await waitFor(() => expect(screen.getByText('signed in as rubensworks')).toBeDefined());
       expect(screen.getByText('scoped to comunica')).toBeDefined();
+    });
+  });
+
+  describe('managing the token from the settings', () => {
+    it('reports where the token is stored', async() => {
+      localStorage.setItem(TOKEN_KEY, 'stored');
+      render(<App />);
+      await waitFor(() => expect(screen.getByText('token local')).toBeDefined());
+    });
+
+    it('reports a session-only token', async() => {
+      sessionStorage.setItem(TOKEN_KEY, 'stored');
+      render(<App />);
+      await waitFor(() => expect(screen.getByText('token session')).toBeDefined());
+    });
+
+    it('replaces the token in place, keeping the scope', async() => {
+      history.replaceState(null, '', '/#owner=comunica');
+      localStorage.setItem(TOKEN_KEY, 'stored');
+      render(<App />);
+      await waitFor(() => expect(screen.getByText('swap token')).toBeDefined());
+      fireEvent.click(screen.getByText('swap token'));
+      await waitFor(() => expect(screen.getByText('token session')).toBeDefined());
+      expect(sessionStorage.getItem(TOKEN_KEY)).toBe('replacement');
+      expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
+      expect(screen.getByText('scoped to comunica')).toBeDefined();
+    });
+
+    it('remembers a replacement token when asked to', async() => {
+      sessionStorage.setItem(TOKEN_KEY, 'stored');
+      render(<App />);
+      await waitFor(() => expect(screen.getByText('swap token kept')).toBeDefined());
+      fireEvent.click(screen.getByText('swap token kept'));
+      await waitFor(() => expect(screen.getByText('token local')).toBeDefined());
+      expect(localStorage.getItem(TOKEN_KEY)).toBe('remembered');
+      expect(sessionStorage.getItem(TOKEN_KEY)).toBeNull();
+    });
+
+    it('keeps the old token when the replacement is rejected', async() => {
+      localStorage.setItem(TOKEN_KEY, 'stored');
+      render(<App />);
+      await waitFor(() => expect(screen.getByText('swap token')).toBeDefined());
+      getViewerMock.mockRejectedValueOnce(Object.assign(new Error('Bad'), { status: 401 }));
+      fireEvent.click(screen.getByText('swap token'));
+      await waitFor(() => expect(getViewerMock).toHaveBeenCalledTimes(2));
+      expect(localStorage.getItem(TOKEN_KEY)).toBe('stored');
+      expect(screen.getByText('token local')).toBeDefined();
+    });
+
+    it('drops the token back to the setup screen', async() => {
+      localStorage.setItem(TOKEN_KEY, 'stored');
+      render(<App />);
+      await waitFor(() => expect(screen.getByText('drop token')).toBeDefined());
+      fireEvent.click(screen.getByText('drop token'));
+      expect(screen.getByText('Fine-grained personal access token')).toBeDefined();
+      expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
+    });
+
+    it('drops the token into public mode when the fragment names an owner', async() => {
+      history.replaceState(null, '', '/#owner=comunica');
+      localStorage.setItem(TOKEN_KEY, 'stored');
+      render(<App />);
+      await waitFor(() => expect(screen.getByText('drop token')).toBeDefined());
+      fireEvent.click(screen.getByText('drop token'));
+      expect(screen.getByText('signed in as nobody')).toBeDefined();
+      expect(screen.getByText('scoped to comunica')).toBeDefined();
+      expect(screen.getByText('token none')).toBeDefined();
     });
   });
 

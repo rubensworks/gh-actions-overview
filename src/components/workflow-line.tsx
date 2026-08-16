@@ -67,7 +67,7 @@ export interface IWorkflowLineProps {
  * The latest run of a single workflow, or a placeholder when it never ran.
  */
 export function WorkflowLine({ group, now }: IWorkflowLineProps) {
-  const latest = group.runs[0];
+  const latest = group.primary;
   if (latest === undefined) {
     return (
       <div className="run run--empty">

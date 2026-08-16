@@ -538,6 +538,59 @@ code {
   color: var(--text-faint);
 }
 
+.settings__token {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.settings__hint--status {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.settings__inline--wrap {
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.settings__token-input {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.button--danger {
+  color: var(--failure);
+  border-color: var(--border);
+}
+
+.button--danger:hover {
+  border-color: var(--failure);
+}
+
+.settings__token-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--failure);
+}
+
+.settings__token-ok {
+  margin: 0;
+  font-size: 12px;
+  color: var(--success);
+}
+
 /* ------------------------------------------------------------------- rows */
 
 .repos {

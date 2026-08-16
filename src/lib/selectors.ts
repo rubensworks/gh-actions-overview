@@ -21,13 +21,14 @@ export interface ISummary {
   overall: OverallStatus;
 }
 
-// The most recent run of every workflow that has ever run.
-function latestRuns(workflows: IWorkflowGroup[]): IWorkflowRun[] {
+// The run that represents each workflow: the default branch's, not whatever ran most recently.
+// Everything derived from this — the counts, the filters, and the favicon — therefore reports the
+// state of the default branch.
+function primaryRuns(workflows: IWorkflowGroup[]): IWorkflowRun[] {
   const runs: IWorkflowRun[] = [];
   for (const group of workflows) {
-    const latest = group.runs[0];
-    if (latest !== undefined) {
-      runs.push(latest);
+    if (group.primary !== undefined) {
+      runs.push(group.primary);
     }
   }
   return runs;
@@ -62,7 +63,7 @@ export function summarize(repos: IRepoState[], filters: IFilters): ISummary {
     if (repo.load === 'no-actions') {
       withoutWorkflows++;
     }
-    for (const latest of latestRuns(repo.workflows)) {
+    for (const latest of primaryRuns(repo.workflows)) {
       if (latest.state === 'failure') {
         failureCount++;
       }
@@ -81,10 +82,10 @@ export function summarize(repos: IRepoState[], filters: IFilters): ISummary {
     if (filters.org.length > 0 && repo.repo.owner.toLowerCase() !== filters.org.toLowerCase()) {
       return false;
     }
-    if (filters.onlyFailures && !latestRuns(repo.workflows).some(latest => latest.state === 'failure')) {
+    if (filters.onlyFailures && !primaryRuns(repo.workflows).some(latest => latest.state === 'failure')) {
       return false;
     }
-    if (filters.onlyRunning && !latestRuns(repo.workflows).some(latest => isActive(latest.state))) {
+    if (filters.onlyRunning && !primaryRuns(repo.workflows).some(latest => isActive(latest.state))) {
       return false;
     }
     return needle.length === 0 || matchesQuery(repo, needle);
