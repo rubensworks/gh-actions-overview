@@ -59,6 +59,7 @@ const REPO: IRepoRef = {
   isPrivate: false,
   archived: false,
   pushedAt: '2026-05-01T00:00:00Z',
+  defaultBranch: 'master',
   source: 'user',
 };
 
@@ -70,6 +71,7 @@ function apiRepo(name: string, pushedAt: string | null): Record<string, unknown>
     private: false,
     archived: false,
     pushed_at: pushedAt,
+    default_branch: 'master',
     owner: { login: 'rubensworks' },
   };
 }
@@ -244,25 +246,81 @@ describe('toRunState', () => {
 
 describe('groupRuns', () => {
   it('keeps workflows that never ran', () => {
-    expect(groupRuns([], [ workflow(10, 'CI') ])).toEqual([
-      { workflowId: 10, name: 'CI', runs: []},
+    expect(groupRuns([], [ workflow(10, 'CI') ], 'master')).toEqual([
+      { workflowId: 10, name: 'CI', runs: [], primary: undefined },
     ]);
   });
 
   it('drops workflows deleted from the default branch', () => {
-    expect(groupRuns([], [ workflow(10, 'Old', 'deleted_workflow_state') ])).toEqual([]);
+    expect(groupRuns([], [ workflow(10, 'Old', 'deleted_workflow_state') ], 'master')).toEqual([]);
   });
 
   it('groups runs under their workflow', () => {
-    const groups = groupRuns([ run({ id: 1 }), run({ id: 2 }) ], [ workflow(10, 'CI') ]);
+    const groups = groupRuns([ run({ id: 1 }), run({ id: 2 }) ], [ workflow(10, 'CI') ], 'master');
     expect(groups[0]?.runs.map(entry => entry.id)).toEqual([ 1, 2 ]);
   });
 
   it('invents a group for runs of an unknown workflow', () => {
-    const groups = groupRuns([ run({ workflowId: 99, workflowName: 'Ghost' }) ], []);
+    const groups = groupRuns([ run({ workflowId: 99, workflowName: 'Ghost' }) ], [], 'master');
+    const ghost = run({ workflowId: 99, workflowName: 'Ghost' });
     expect(groups).toEqual([
-      { workflowId: 99, name: 'Ghost', runs: [ run({ workflowId: 99, workflowName: 'Ghost' }) ]},
+      { workflowId: 99, name: 'Ghost', runs: [ ghost ], primary: ghost },
     ]);
+  });
+
+  describe('the primary run', () => {
+    it('is the newest run on the default branch', () => {
+      const groups = groupRuns(
+        [
+          run({ id: 1, branch: 'feature', createdAt: '2026-05-01T12:00:00Z' }),
+          run({ id: 2, branch: 'master', createdAt: '2026-05-01T10:00:00Z' }),
+          run({ id: 3, branch: 'master', createdAt: '2026-05-01T08:00:00Z' }),
+        ],
+        [ workflow(10, 'CI') ],
+        'master',
+      );
+      expect(groups[0]?.primary?.id).toBe(2);
+    });
+
+    it('stays on the default branch however old that run is', () => {
+      const groups = groupRuns(
+        [
+          run({ id: 1, branch: 'feature', createdAt: '2026-05-01T12:00:00Z' }),
+          run({ id: 2, branch: 'master', createdAt: '2020-01-01T00:00:00Z' }),
+        ],
+        [ workflow(10, 'CI') ],
+        'master',
+      );
+      expect(groups[0]?.primary?.id).toBe(2);
+    });
+
+    it('honours a default branch that is not master', () => {
+      const groups = groupRuns(
+        [
+          run({ id: 1, branch: 'master', createdAt: '2026-05-01T12:00:00Z' }),
+          run({ id: 2, branch: 'main', createdAt: '2026-05-01T10:00:00Z' }),
+        ],
+        [ workflow(10, 'CI') ],
+        'main',
+      );
+      expect(groups[0]?.primary?.id).toBe(2);
+    });
+
+    it('falls back to the newest run when the default branch has none', () => {
+      const groups = groupRuns(
+        [
+          run({ id: 1, branch: 'feature', createdAt: '2026-05-01T10:00:00Z' }),
+          run({ id: 2, branch: 'other', createdAt: '2026-05-01T12:00:00Z' }),
+        ],
+        [ workflow(10, 'CI') ],
+        'master',
+      );
+      expect(groups[0]?.primary?.id).toBe(2);
+    });
+
+    it('is undefined for a workflow that never ran', () => {
+      expect(groupRuns([], [ workflow(10, 'CI') ], 'master')[0]?.primary).toBeUndefined();
+    });
   });
 
   it('sorts runs newest first', () => {
@@ -272,6 +330,7 @@ describe('groupRuns', () => {
         run({ id: 2, createdAt: '2026-05-01T12:00:00Z' }),
       ],
       [ workflow(10, 'CI') ],
+      'master',
     );
     expect(groups[0]?.runs.map(entry => entry.id)).toEqual([ 2, 1 ]);
   });
@@ -280,6 +339,7 @@ describe('groupRuns', () => {
     const groups = groupRuns(
       [ run({ workflowId: 30 }) ],
       [ workflow(10, 'Zeta'), workflow(20, 'Alpha'), workflow(30, 'Middle') ],
+      'master',
     );
     expect(groups.map(group => group.name)).toEqual([ 'Middle', 'Alpha', 'Zeta' ]);
   });
@@ -423,6 +483,7 @@ describe('GitHubClient', () => {
         isPrivate: false,
         archived: false,
         pushedAt: '2026-05-01T00:00:00Z',
+        defaultBranch: 'master',
         source: 'user',
       });
     });

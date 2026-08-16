@@ -463,6 +463,7 @@ export class DashboardStore {
       return IDLE_MAX_MS;
     }
     const busy = workflows.some((group) => {
+      // Any in-flight run keeps the repository on the fast interval, even on a side branch.
       const latest = group.runs[0];
       return latest !== undefined && isActive(latest.state);
     });
@@ -475,7 +476,8 @@ export class DashboardStore {
 
   private detectFailures(ref: IRepoRef, workflows: IWorkflowGroup[]): void {
     for (const group of workflows) {
-      const latest = group.runs[0];
+      // Notify on the run the dashboard shows, which is the default branch's.
+      const latest = group.primary;
       if (latest === undefined) {
         continue;
       }

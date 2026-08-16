@@ -2,8 +2,15 @@ import { useCallback, useEffect, useState } from 'react';
 import { Dashboard } from './components/dashboard';
 import { SetupScreen } from './components/setup-screen';
 import { GitHubClient, describeError } from './lib/githubClient';
-import { clearToken, loadSettings, loadToken, saveSettings, saveToken } from './lib/storage';
-import type { ISettings, IViewer } from './lib/types';
+import {
+  clearToken,
+  loadSettings,
+  loadToken,
+  saveSettings,
+  saveToken,
+  tokenLocation,
+} from './lib/storage';
+import type { ISettings, IViewer, TokenLocation } from './lib/types';
 import { readOwner, writeUrlState } from './lib/urlState';
 
 interface ISession {
@@ -30,6 +37,7 @@ export function App() {
   const [ session, setSession ] = useState<ISession | undefined>();
   const [ booting, setBooting ] = useState(true);
   const [ authError, setAuthError ] = useState<string | undefined>();
+  const [ tokenAt, setTokenAt ] = useState<TokenLocation>(() => tokenLocation());
 
   useEffect(() => {
     document.documentElement.dataset.theme = settings.theme;
@@ -44,8 +52,34 @@ export function App() {
       throw new Error(describeError(error));
     }
     saveToken(token, remember);
+    setTokenAt(remember ? 'local' : 'session');
     setAuthError(undefined);
     setSession({ client, viewer, owner: readOwner(location.hash) || undefined });
+  }, []);
+
+  // Swapping the token in place keeps whatever owner the dashboard is scoped to.
+  const replaceToken = useCallback(async(token: string, remember: boolean) => {
+    const client = new GitHubClient(token);
+    let viewer: IViewer;
+    try {
+      viewer = await client.getViewer();
+    } catch (error: unknown) {
+      throw new Error(describeError(error));
+    }
+    saveToken(token, remember);
+    setTokenAt(remember ? 'local' : 'session');
+    setSession(current => ({ client, viewer, owner: current?.owner }));
+  }, []);
+
+  // Removing the token drops to public mode when an owner is in the fragment, since that view
+  // still works without one, and back to the setup screen otherwise.
+  const removeToken = useCallback(() => {
+    clearToken();
+    setTokenAt('none');
+    const owner = readOwner(location.hash);
+    setSession(owner.length > 0 ?
+        { client: new GitHubClient(undefined), viewer: undefined, owner } :
+      undefined);
   }, []);
 
   const browse = useCallback((owner: string) => {
@@ -61,6 +95,7 @@ export function App() {
       if (owner.length > 0) {
         setSession({ client: new GitHubClient(undefined), viewer: undefined, owner });
       }
+      setTokenAt('none');
       setBooting(false);
       return;
     }
@@ -75,6 +110,7 @@ export function App() {
       .catch((error: unknown) => {
         if (!cancelled) {
           clearToken();
+          setTokenAt('none');
           setAuthError(`Stored token could not be used: ${describeError(error)}`);
         }
       })
@@ -95,6 +131,7 @@ export function App() {
 
   const leave = useCallback(() => {
     clearToken();
+    setTokenAt('none');
     writeUrlState('', { query: '', onlyFailures: false, onlyRunning: false, org: '' });
     setSession(undefined);
     setAuthError(undefined);
@@ -114,7 +151,10 @@ export function App() {
       viewer={session.viewer}
       owner={session.owner}
       settings={settings}
+      tokenLocation={tokenAt}
       onSettingsChange={updateSettings}
+      onTokenSave={replaceToken}
+      onTokenRemove={removeToken}
       onLeave={leave}
     />
   );

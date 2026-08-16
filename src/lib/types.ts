@@ -33,6 +33,10 @@ export interface IRepoRef {
   isPrivate: boolean;
   archived: boolean;
   pushedAt: string;
+  /**
+   * The branch the repository considers its trunk, such as `master` or `main`.
+   */
+  defaultBranch: string;
   source: RepoSource;
 }
 
@@ -57,9 +61,16 @@ export interface IWorkflowGroup {
   workflowId: number;
   name: string;
   /**
-   * Runs of this workflow, newest first.
+   * Runs of this workflow, newest first, whatever branch they ran on.
    */
   runs: IWorkflowRun[];
+  /**
+   * The run that represents this workflow's status: the newest one on the repository's default
+   * branch. A run on a feature branch never displaces it, however recent it is. Only when the
+   * default branch has no run among those fetched does the newest run on any branch stand in.
+   * Undefined when the workflow has never run.
+   */
+  primary: IWorkflowRun | undefined;
 }
 
 export interface IRepoState {
@@ -101,6 +112,11 @@ export interface ISettings {
 }
 
 export type Theme = 'auto' | 'dark' | 'light';
+
+/**
+ * Where the personal access token currently lives, if anywhere.
+ */
+export type TokenLocation = 'local' | 'none' | 'session';
 
 export interface IFilters {
   query: string;

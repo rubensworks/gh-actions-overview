@@ -81,6 +81,58 @@ describe('summarize', () => {
     });
   });
 
+  describe('the default branch decides the reported status', () => {
+    // A group whose newest run is on a side branch, but whose default-branch run is older.
+    const sideBranchGreen = repoState('a/mixed', {
+      workflows: [ workflowGroup(
+        'CI',
+        [
+          workflowRun('failure', { branch: 'feature/x', createdAt: '2026-05-01T11:59:00Z' }),
+          workflowRun('success', { branch: 'master', createdAt: '2026-04-01T09:00:00Z' }),
+        ],
+        10,
+        workflowRun('success', { branch: 'master', createdAt: '2026-04-01T09:00:00Z' }),
+      ) ],
+    });
+
+    it('does not count a failing side branch as a failure', () => {
+      const summary = summarize([ sideBranchGreen ], filters());
+      expect(summary.failureCount).toBe(0);
+      expect(summary.overall).toBe('success');
+    });
+
+    it('does not count a running side branch as running', () => {
+      const running = repoState('a/mixed', {
+        workflows: [ workflowGroup(
+          'CI',
+          [ workflowRun('running', { branch: 'feature/x' }), workflowRun('success', { branch: 'master' }) ],
+          10,
+          workflowRun('success', { branch: 'master' }),
+        ) ],
+      });
+      expect(summarize([ running ], filters()).runningCount).toBe(0);
+    });
+
+    it('hides such a repository from the failures filter', () => {
+      expect(summarize([ sideBranchGreen ], filters({ onlyFailures: true })).visible).toEqual([]);
+    });
+
+    it('counts a failing default branch even when a side branch is green', () => {
+      const trunkRed = repoState('a/mixed', {
+        workflows: [ workflowGroup(
+          'CI',
+          [ workflowRun('success', { branch: 'feature/x' }), workflowRun('failure', { branch: 'master' }) ],
+          10,
+          workflowRun('failure', { branch: 'master' }),
+        ) ],
+      });
+      const summary = summarize([ trunkRed ], filters());
+      expect(summary.failureCount).toBe(1);
+      expect(summary.overall).toBe('failure');
+      expect(summary.visible).toEqual([ trunkRed ]);
+    });
+  });
+
   describe('filters', () => {
     it('filters by owner, case-insensitively', () => {
       expect(summarize([ failing, running ], filters({ org: 'COMUNICA' })).visible)

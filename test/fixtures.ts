@@ -20,6 +20,7 @@ export function repoRef(fullName: string, overrides: Partial<IRepoRef> = {}): IR
     isPrivate: false,
     archived: false,
     pushedAt: '2026-05-01T11:00:00Z',
+    defaultBranch: 'master',
     source: 'user',
     ...overrides,
   };
@@ -49,8 +50,9 @@ export function workflowGroup(
   name: string,
   runs: IWorkflowRun[],
   workflowId = 10,
+  primary: IWorkflowRun | undefined = runs[0],
 ): IWorkflowGroup {
-  return { workflowId, name, runs };
+  return { workflowId, name, runs, primary };
 }
 
 export function repoState(fullName: string, overrides: Partial<IRepoState> = {}): IRepoState {
