@@ -23,6 +23,18 @@ vi.mock('../src/lib/githubClient', async(importOriginal) => {
   };
 });
 
+// The real settings panel awaits onTokenSave inside a try/catch, so the stand-in has to swallow a
+// rejection too. Leaving it to float would fail the run as an unhandled rejection.
+function save(
+  onTokenSave: (token: string, remember: boolean) => Promise<void>,
+  token: string,
+  remember: boolean,
+): void {
+  onTokenSave(token, remember).catch(() => {
+    // Swallowed exactly as the real settings panel swallows it.
+  });
+}
+
 // The dashboard itself is covered by its own suite; here it only has to expose its callbacks.
 vi.mock('../src/components/dashboard', () => ({
   Dashboard: (props: {
@@ -43,10 +55,10 @@ vi.mock('../src/components/dashboard', () => ({
       <button type="button" onClick={() => props.onSettingsChange({ ...props.settings, windowDays: 7 })}>
         narrow
       </button>
-      <button type="button" onClick={() => void props.onTokenSave('replacement', false)}>
+      <button type="button" onClick={() => save(props.onTokenSave, 'replacement', false)}>
         swap token
       </button>
-      <button type="button" onClick={() => void props.onTokenSave('remembered', true)}>
+      <button type="button" onClick={() => save(props.onTokenSave, 'remembered', true)}>
         swap token kept
       </button>
       <button type="button" onClick={props.onTokenRemove}>drop token</button>
