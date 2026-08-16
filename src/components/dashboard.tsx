@@ -4,7 +4,7 @@ import { applyOverallStatus } from '../lib/favicon';
 import type { GitHubClient } from '../lib/githubClient';
 import { notifyFailure } from '../lib/notifications';
 import { summarize } from '../lib/selectors';
-import type { IFilters, ISettings, IViewer } from '../lib/types';
+import type { IFilters, ISettings, IViewer, TokenLocation } from '../lib/types';
 import { readFilters, writeUrlState } from '../lib/urlState';
 import { FilterBar } from './filter-bar';
 import { RepoDrawer } from './repo-drawer';
@@ -25,7 +25,10 @@ export interface IDashboardProps {
    */
   owner: string | undefined;
   settings: ISettings;
+  tokenLocation: TokenLocation;
   onSettingsChange: (settings: ISettings) => void;
+  onTokenSave: (token: string, remember: boolean) => Promise<void>;
+  onTokenRemove: () => void;
   onLeave: () => void;
 }
 
@@ -33,7 +36,8 @@ export interface IDashboardProps {
  * The main dashboard shell: header, filters, repository rows, drawer and status bar.
  */
 export function Dashboard(props: IDashboardProps) {
-  const { client, viewer, owner, settings, onSettingsChange, onLeave } = props;
+  const { client, viewer, owner, settings, tokenLocation, onSettingsChange, onLeave } = props;
+  const { onTokenSave, onTokenRemove } = props;
 
   const [ filters, setFilters ] = useState<IFilters>(() => readFilters(location.hash));
   const [ now, setNow ] = useState(() => Date.now());
@@ -131,7 +135,17 @@ export function Dashboard(props: IDashboardProps) {
         </div>
       </header>
 
-      {settingsOpen ? <SettingsPanel settings={settings} onChange={onSettingsChange} /> : null}
+      {settingsOpen ?
+          (
+            <SettingsPanel
+              settings={settings}
+              tokenLocation={tokenLocation}
+              onChange={onSettingsChange}
+              onTokenSave={onTokenSave}
+              onTokenRemove={onTokenRemove}
+            />
+          ) :
+        null}
 
       <FilterBar
         filters={filters}

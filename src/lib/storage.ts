@@ -1,4 +1,4 @@
-import type { ISettings, Theme } from './types';
+import type { ISettings, Theme, TokenLocation } from './types';
 
 const TOKEN_KEY = 'gh-actions-overview:token';
 const SETTINGS_KEY = 'gh-actions-overview:settings';
@@ -55,6 +55,17 @@ export function loadToken(): IStoredToken | undefined {
     return { token: localToken, remembered: true };
   }
   return undefined;
+}
+
+/**
+ * Reports where the token currently lives, so the settings can say so.
+ */
+export function tokenLocation(): TokenLocation {
+  const stored = loadToken();
+  if (stored === undefined) {
+    return 'none';
+  }
+  return stored.remembered ? 'local' : 'session';
 }
 
 /**

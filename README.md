@@ -17,8 +17,11 @@ this app ever talks to is `api.github.com`, straight from your browser.
 
 ## Features
 
-- **One row per repository** with the latest run of each workflow: status icon, branch, commit
+- **One row per repository** with the state of each workflow: status icon, branch, commit
   message, relative time, duration, and a deep link to the run on github.com.
+- **The default branch is the status.** Each workflow reports its newest run on the repository's
+  default branch, however long ago that was. A red feature branch never displaces a green `master`,
+  and the failure count and the favicon follow the same rule.
 - **Smart polling.** Repositories with a queued or running workflow refresh every 15 seconds;
   quiet ones every 2–5 minutes, jittered so requests do not arrive in bursts. Polling pauses
   entirely while the tab is hidden.
@@ -131,7 +134,24 @@ In **Settings** you can:
 - add **organisations**, which pulls in their repositories too;
 - **pin** individual `owner/repo` entries, which are always shown regardless of the push window;
 - include archived repositories;
-- switch the theme and enable failure notifications.
+- switch the theme and enable failure notifications;
+- **replace or remove the token**, without signing out first. The panel says where the token is
+  stored, a new one is checked against the API before it replaces the old, and removing it drops
+  you to public mode when the fragment names an owner, or back to the setup screen otherwise.
+
+## Which run is shown
+
+A repository row shows one line per workflow, and that line is the workflow's **newest run on the
+default branch** — `master`, `main`, or whatever the repository declares. This holds even when the
+default branch last ran weeks ago and a feature branch ran minutes ago: a branch that is not the
+trunk never speaks for the repository.
+
+Everything derived from that line follows it, so the *Failing* count, the *only failures* filter,
+and the red/green favicon all report the state of the default branch, not of the busiest branch.
+
+Only if none of the ten fetched runs is on the default branch does the newest run stand in. The
+repository drawer is unaffected and still lists every run of every workflow in chronological order,
+side branches included.
 
 Settings are persisted in `localStorage`. The view — the owner being browsed and every filter —
 is persisted in the URL fragment (`#owner=comunica&failures=1`), which browsers never send to a

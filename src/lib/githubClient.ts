@@ -36,6 +36,7 @@ interface IApiRepo {
   private: boolean;
   archived: boolean;
   pushed_at: string | null;
+  default_branch: string;
   owner: IApiOwner;
 }
 
@@ -175,6 +176,7 @@ function toRepoRef(repo: IApiRepo, source: RepoSource): IRepoRef {
     isPrivate: repo.private,
     archived: repo.archived,
     pushedAt: repo.pushed_at ?? '1970-01-01T00:00:00Z',
+    defaultBranch: repo.default_branch,
     source,
   };
 }
@@ -314,7 +316,7 @@ export class GitHubClient {
       'GET /repos/{owner}/{repo}/actions/runs',
       { owner: repo.owner, repo: repo.name, per_page: RUNS_PER_REPO },
     );
-    return groupRuns(data.workflow_runs.map(run => toWorkflowRun(run)), workflows);
+    return groupRuns(data.workflow_runs.map(run => toWorkflowRun(run)), workflows, repo.defaultBranch);
   }
 
   private async listRepoPages(
@@ -390,19 +392,34 @@ export class GitHubClient {
  * Groups runs per workflow, newest first, keeping workflows without runs.
  * @param runs Workflow runs of a single repository.
  * @param workflows The workflows defined in that repository.
+ * @param defaultBranch The repository's default branch, whose runs represent the workflow.
  */
-export function groupRuns(runs: IWorkflowRun[], workflows: IWorkflowDefinition[]): IWorkflowGroup[] {
+export function groupRuns(
+  runs: IWorkflowRun[],
+  workflows: IWorkflowDefinition[],
+  defaultBranch: string,
+): IWorkflowGroup[] {
   const groups = new Map<number, IWorkflowGroup>();
   for (const workflow of workflows) {
     // Workflows that were deleted from the default branch linger in the API as `deleted_workflow_state`.
     if (workflow.state !== 'deleted_workflow_state') {
-      groups.set(workflow.id, { workflowId: workflow.id, name: workflow.name, runs: []});
+      groups.set(workflow.id, {
+        workflowId: workflow.id,
+        name: workflow.name,
+        runs: [],
+        primary: undefined,
+      });
     }
   }
   for (const run of runs) {
     const existing = groups.get(run.workflowId);
     if (existing === undefined) {
-      groups.set(run.workflowId, { workflowId: run.workflowId, name: run.workflowName, runs: [ run ]});
+      groups.set(run.workflowId, {
+        workflowId: run.workflowId,
+        name: run.workflowName,
+        runs: [ run ],
+        primary: undefined,
+      });
     } else {
       existing.runs.push(run);
     }
@@ -410,6 +427,8 @@ export function groupRuns(runs: IWorkflowRun[], workflows: IWorkflowDefinition[]
   const result = [ ...groups.values() ];
   for (const group of result) {
     group.runs.sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
+    // The default branch speaks for the workflow, however long ago it last ran there.
+    group.primary = group.runs.find(run => run.branch === defaultBranch) ?? group.runs[0];
   }
   // Workflows that have runs come first, so that dormant workflows do not push live ones out of sight.
   result.sort((left, right) => {

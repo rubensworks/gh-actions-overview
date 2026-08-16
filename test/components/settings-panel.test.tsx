@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsPanel } from '../../src/components/settings-panel';
 import { notificationPermission, requestNotificationPermission } from '../../src/lib/notifications';
-import type { ISettings } from '../../src/lib/types';
+import type { ISettings, TokenLocation } from '../../src/lib/types';
 import { settings } from '../fixtures';
 
 vi.mock('../../src/lib/notifications', () => ({
@@ -22,18 +22,36 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-function renderPanel(overrides: Partial<ISettings> = {}): {
+interface IPanelOptions {
+  tokenLocation?: TokenLocation;
+  onTokenSave?: (token: string, remember: boolean) => Promise<void>;
+}
+
+function renderPanel(overrides: Partial<ISettings> = {}, options: IPanelOptions = {}): {
   onChange: ReturnType<typeof vi.fn>;
+  onTokenSave: ReturnType<typeof vi.fn>;
+  onTokenRemove: ReturnType<typeof vi.fn>;
   rerender: (next: Partial<ISettings>) => void;
 } {
   const onChange = vi.fn();
-  const current = settings(overrides);
-  const { rerender } = render(<SettingsPanel settings={current} onChange={onChange} />);
+  const onTokenSave = vi.fn(options.onTokenSave ?? (async(): Promise<void> => undefined));
+  const onTokenRemove = vi.fn();
+  const location = options.tokenLocation ?? 'local';
+  const panel = (next: Partial<ISettings>): React.ReactElement => (
+    <SettingsPanel
+      settings={settings({ ...overrides, ...next })}
+      tokenLocation={location}
+      onChange={onChange}
+      onTokenSave={onTokenSave}
+      onTokenRemove={onTokenRemove}
+    />
+  );
+  const { rerender } = render(panel({}));
   return {
     onChange,
-    rerender: (next: Partial<ISettings>): void => {
-      rerender(<SettingsPanel settings={settings({ ...overrides, ...next })} onChange={onChange} />);
-    },
+    onTokenSave,
+    onTokenRemove,
+    rerender: (next: Partial<ISettings>): void => rerender(panel(next)),
   };
 }
 
@@ -107,6 +125,127 @@ describe('SettingsPanel', () => {
       rerender({ extraRepos: [ 'a/b' ]});
       expect(screen.getByPlaceholderText('rubensworks/gh-actions-overview'))
         .toHaveProperty('value', 'a/b');
+    });
+  });
+
+  describe('the token', () => {
+    it.each<[ TokenLocation, RegExp ]>([
+      [ 'local', /stored in this browser/u ],
+      [ 'session', /stored for this tab only/u ],
+      [ 'none', /No token is stored/u ],
+    ])('says where a %s token lives', (tokenLocation, pattern) => {
+      renderPanel({}, { tokenLocation });
+      expect(screen.getByText(pattern)).toBeDefined();
+    });
+
+    it('offers removal only when a token exists', () => {
+      renderPanel({}, { tokenLocation: 'local' });
+      expect(screen.getByText('Remove token')).toBeDefined();
+      cleanup();
+      renderPanel({}, { tokenLocation: 'none' });
+      expect(screen.queryByText('Remove token')).toBeNull();
+    });
+
+    it('removes the token on request', () => {
+      const { onTokenRemove } = renderPanel({}, { tokenLocation: 'session' });
+      fireEvent.click(screen.getByText('Remove token'));
+      expect(onTokenRemove).toHaveBeenCalledTimes(1);
+    });
+
+    it('saves a pasted token, remembering it by default', async() => {
+      const { onTokenSave } = renderPanel({}, { tokenLocation: 'none' });
+      fireEvent.change(screen.getByLabelText('Replace the personal access token'), {
+        target: { value: '  github_pat_new  ' },
+      });
+      fireEvent.click(screen.getByText('Save token'));
+      await waitFor(() => expect(onTokenSave).toHaveBeenCalledWith('github_pat_new', true));
+      expect(screen.getByText('Token saved.')).toBeDefined();
+    });
+
+    it('starts with "don\'t remember me" ticked for a session token', async() => {
+      const { onTokenSave } = renderPanel({}, { tokenLocation: 'session' });
+      fireEvent.change(screen.getByLabelText('Replace the personal access token'), {
+        target: { value: 'github_pat_new' },
+      });
+      fireEvent.click(screen.getByText('Save token'));
+      await waitFor(() => expect(onTokenSave).toHaveBeenCalledWith('github_pat_new', false));
+    });
+
+    it('honours a change to the remember checkbox', async() => {
+      const { onTokenSave } = renderPanel({}, { tokenLocation: 'local' });
+      fireEvent.change(screen.getByLabelText('Replace the personal access token'), {
+        target: { value: 'github_pat_new' },
+      });
+      fireEvent.click(screen.getByText(/Don't remember me/u));
+      fireEvent.click(screen.getByText('Save token'));
+      await waitFor(() => expect(onTokenSave).toHaveBeenCalledWith('github_pat_new', false));
+    });
+
+    it('refuses an empty token', () => {
+      const { onTokenSave } = renderPanel({}, { tokenLocation: 'none' });
+      fireEvent.click(screen.getByText('Save token'));
+      expect(onTokenSave).not.toHaveBeenCalled();
+      expect(screen.getByRole('alert').textContent).toBe('Paste a token first.');
+    });
+
+    it('reports a token the API rejects', async() => {
+      const { onTokenSave } = renderPanel({}, {
+        tokenLocation: 'local',
+        onTokenSave: async(): Promise<void> => {
+          throw new Error('Token is invalid or expired');
+        },
+      });
+      fireEvent.change(screen.getByLabelText('Replace the personal access token'), {
+        target: { value: 'bad' },
+      });
+      fireEvent.click(screen.getByText('Save token'));
+      await waitFor(() =>
+        expect(screen.getByRole('alert').textContent).toBe('Token is invalid or expired'));
+      expect(onTokenSave).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports a non-Error rejection', async() => {
+      renderPanel({}, {
+        tokenLocation: 'local',
+        onTokenSave: async(): Promise<void> => {
+          // eslint-disable-next-line no-throw-literal
+          throw 'exploded';
+        },
+      });
+      fireEvent.change(screen.getByLabelText('Replace the personal access token'), {
+        target: { value: 'bad' },
+      });
+      fireEvent.click(screen.getByText('Save token'));
+      await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('exploded'));
+    });
+
+    it('shows a busy state while the token is checked', async() => {
+      let release = (): void => undefined;
+      renderPanel({}, {
+        tokenLocation: 'local',
+        onTokenSave: async(): Promise<void> => {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        },
+      });
+      fireEvent.change(screen.getByLabelText('Replace the personal access token'), {
+        target: { value: 'github_pat_new' },
+      });
+      fireEvent.click(screen.getByText('Save token'));
+      await waitFor(() => expect(screen.getByText('Checking…')).toBeDefined());
+      release();
+      await waitFor(() => expect(screen.getByText('Save token')).toBeDefined());
+    });
+
+    it('clears the confirmation once typing resumes', async() => {
+      renderPanel({}, { tokenLocation: 'local' });
+      const field = screen.getByLabelText('Replace the personal access token');
+      fireEvent.change(field, { target: { value: 'github_pat_new' }});
+      fireEvent.click(screen.getByText('Save token'));
+      await waitFor(() => expect(screen.getByText('Token saved.')).toBeDefined());
+      fireEvent.change(field, { target: { value: 'another' }});
+      expect(screen.queryByText('Token saved.')).toBeNull();
     });
   });
 

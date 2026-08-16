@@ -5,7 +5,7 @@ import type { IFailureEvent } from '../../src/lib/dashboardStore';
 import { applyOverallStatus } from '../../src/lib/favicon';
 import type { GitHubClient } from '../../src/lib/githubClient';
 import { notifyFailure } from '../../src/lib/notifications';
-import type { IDashboardState, ISettings, IViewer } from '../../src/lib/types';
+import type { IDashboardState, ISettings, IViewer, TokenLocation } from '../../src/lib/types';
 import { NOW, repoState, settings, workflowGroup, workflowRun } from '../fixtures';
 
 // A hand-driven stand-in for the polling store, so the shell can be tested without timers.
@@ -101,26 +101,34 @@ interface IRenderOptions {
   settings?: Partial<ISettings>;
   viewer?: IViewer | undefined;
   owner?: string | undefined;
+  tokenLocation?: TokenLocation;
 }
 
 function renderDashboard(options: IRenderOptions = {}): {
   onSettingsChange: ReturnType<typeof vi.fn>;
   onLeave: ReturnType<typeof vi.fn>;
+  onTokenSave: ReturnType<typeof vi.fn>;
+  onTokenRemove: ReturnType<typeof vi.fn>;
   store: () => FakeStoreInstance;
 } {
   const onSettingsChange = vi.fn();
   const onLeave = vi.fn();
+  const onTokenSave = vi.fn(async(): Promise<void> => undefined);
+  const onTokenRemove = vi.fn();
   render(
     <Dashboard
       client={{} as unknown as GitHubClient}
       viewer={'viewer' in options ? options.viewer : VIEWER}
       owner={options.owner}
       settings={settings(options.settings)}
+      tokenLocation={options.tokenLocation ?? 'local'}
       onSettingsChange={onSettingsChange}
+      onTokenSave={onTokenSave}
+      onTokenRemove={onTokenRemove}
       onLeave={onLeave}
     />,
   );
-  return { onSettingsChange, onLeave, store: () => FakeStore.last! };
+  return { onSettingsChange, onLeave, onTokenSave, onTokenRemove, store: () => FakeStore.last! };
 }
 
 // The repository names shown in the rows, which is what the filters act on.
@@ -251,6 +259,19 @@ describe('Dashboard', () => {
       expect(screen.getByText('Include archived repositories')).toBeDefined();
       fireEvent.click(screen.getByText('Settings'));
       expect(screen.queryByText('Include archived repositories')).toBeNull();
+    });
+
+    it('lets the token be removed from the settings', () => {
+      const { onTokenRemove } = renderDashboard();
+      fireEvent.click(screen.getByText('Settings'));
+      fireEvent.click(screen.getByText('Remove token'));
+      expect(onTokenRemove).toHaveBeenCalledTimes(1);
+    });
+
+    it('passes the token location through', () => {
+      renderDashboard({ tokenLocation: 'none' });
+      fireEvent.click(screen.getByText('Settings'));
+      expect(screen.getByText(/No token is stored/u)).toBeDefined();
     });
 
     it('forwards settings changes', () => {
