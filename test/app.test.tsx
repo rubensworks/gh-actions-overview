@@ -6,7 +6,11 @@ import type { ISettings, IViewer } from '../src/lib/types';
 
 const VIEWER: IViewer = { login: 'rubensworks', name: 'Ruben Taelman', avatarUrl: 'https://a/x.png' };
 
-const { getViewerMock } = vi.hoisted(() => ({ getViewerMock: vi.fn() }));
+const { getViewerMock, checkOrgAccessMock, constructed } = vi.hoisted(() => ({
+  getViewerMock: vi.fn(),
+  checkOrgAccessMock: vi.fn<(org: string) => Promise<void>>(),
+  constructed: [] as { token: string | undefined; ownerTokens: { owner: string; token: string }[] }[],
+}));
 
 vi.mock('../src/lib/githubClient', async(importOriginal) => {
   const original = await importOriginal<typeof import('../src/lib/githubClient')>();
@@ -15,9 +19,11 @@ vi.mock('../src/lib/githubClient', async(importOriginal) => {
     GitHubClient: class FakeGitHubClient {
       public readonly token: string;
       public readonly getViewer = getViewerMock;
+      public readonly checkOrgAccess = checkOrgAccessMock;
 
-      public constructor(token: string) {
+      public constructor(token: string, ownerTokens: { owner: string; token: string }[] = []) {
         this.token = token;
+        constructed.push({ token, ownerTokens });
       }
     },
   };
@@ -45,6 +51,9 @@ vi.mock('../src/components/dashboard', () => ({
     onSettingsChange: (settings: ISettings) => void;
     onTokenSave: (token: string, remember: boolean) => Promise<void>;
     onTokenRemove: () => void;
+    ownerTokens: { owner: string; token: string }[];
+    onOwnerTokenSave: (owner: string, token: string) => Promise<void>;
+    onOwnerTokenRemove: (owner: string) => void;
     onLeave: () => void;
   }) => (
     <div>
@@ -62,12 +71,25 @@ vi.mock('../src/components/dashboard', () => ({
         swap token kept
       </button>
       <button type="button" onClick={props.onTokenRemove}>drop token</button>
+      <span>orgs {props.ownerTokens.map(entry => entry.owner).join(',') || 'none'}</span>
+      <button
+        type="button"
+        onClick={() => {
+          props.onOwnerTokenSave('comunica', 'org-token').catch(() => {
+            // Swallowed exactly as the real settings panel swallows it.
+          });
+        }}
+      >
+        add org token
+      </button>
+      <button type="button" onClick={() => props.onOwnerTokenRemove('comunica')}>drop org token</button>
       <button type="button" onClick={props.onLeave}>leave</button>
     </div>
   ),
 }));
 
 const TOKEN_KEY = 'gh-actions-overview:token';
+const OWNER_TOKENS_KEY = 'gh-actions-overview:owner-tokens';
 
 beforeEach(() => {
   history.replaceState(null, '', '/');
@@ -75,6 +97,9 @@ beforeEach(() => {
   sessionStorage.clear();
   getViewerMock.mockReset();
   getViewerMock.mockResolvedValue(VIEWER);
+  checkOrgAccessMock.mockReset();
+  checkOrgAccessMock.mockResolvedValue();
+  constructed.length = 0;
   document.documentElement.removeAttribute('data-theme');
 });
 
@@ -317,5 +342,118 @@ describe('App', () => {
     fireEvent.click(screen.getByText('Connect'));
     await waitFor(() => expect(screen.getByText(/signed in as/u)).toBeDefined());
     expect(new GitHubClient('abc123')).toHaveProperty('token', 'abc123');
+  });
+});
+
+// A fine-grained token reaches one resource owner, so watching an organisation's private
+// repositories alongside your own means holding two tokens at once.
+describe('organisation tokens', () => {
+  async function signedIn(): Promise<void> {
+    localStorage.setItem(TOKEN_KEY, 'mine');
+    render(<App />);
+    await screen.findByText('signed in as rubensworks');
+  }
+
+  it('are checked against the organisation before they are kept', async() => {
+    await signedIn();
+    fireEvent.click(screen.getByText('add org token'));
+    await waitFor(() => expect(checkOrgAccessMock).toHaveBeenCalledWith('comunica'));
+  });
+
+  it('are stored and handed to the dashboard', async() => {
+    await signedIn();
+    fireEvent.click(screen.getByText('add org token'));
+    await screen.findByText('orgs comunica');
+    expect(JSON.parse(localStorage.getItem(OWNER_TOKENS_KEY) ?? '[]'))
+      .toEqual([{ owner: 'comunica', token: 'org-token' }]);
+  });
+
+  it('put the organisation on the dashboard too', async() => {
+    await signedIn();
+    fireEvent.click(screen.getByText('add org token'));
+    await screen.findByText('orgs comunica');
+    const stored = JSON.parse(localStorage.getItem('gh-actions-overview:settings') ?? '{}') as ISettings;
+    expect(stored.orgs).toEqual([ 'comunica' ]);
+  });
+
+  it('do not add the organisation twice', async() => {
+    localStorage.setItem('gh-actions-overview:settings', JSON.stringify({ orgs: [ 'Comunica' ]}));
+    await signedIn();
+    fireEvent.click(screen.getByText('add org token'));
+    await screen.findByText('orgs comunica');
+    const stored = JSON.parse(localStorage.getItem('gh-actions-overview:settings') ?? '{}') as ISettings;
+    expect(stored.orgs).toEqual([ 'Comunica' ]);
+  });
+
+  it('rebuild the client so the new token is used at once', async() => {
+    await signedIn();
+    constructed.length = 0;
+    fireEvent.click(screen.getByText('add org token'));
+    await screen.findByText('orgs comunica');
+    // The last client built carries the main token and the organisation's.
+    expect(constructed.at(-1)).toEqual({
+      token: 'mine',
+      ownerTokens: [{ owner: 'comunica', token: 'org-token' }],
+    });
+  });
+
+  it('are rejected when the organisation refuses the token', async() => {
+    checkOrgAccessMock.mockRejectedValue(Object.assign(new Error('Resource not accessible'), { status: 403 }));
+    await signedIn();
+    fireEvent.click(screen.getByText('add org token'));
+    await waitFor(() => expect(checkOrgAccessMock).toHaveBeenCalledTimes(1));
+    expect(screen.getByText('orgs none')).toBeDefined();
+    expect(localStorage.getItem(OWNER_TOKENS_KEY)).toBeNull();
+  });
+
+  it('replace an existing token for the same organisation', async() => {
+    localStorage.setItem(OWNER_TOKENS_KEY, JSON.stringify([{ owner: 'COMUNICA', token: 'old' }]));
+    await signedIn();
+    fireEvent.click(screen.getByText('add org token'));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(OWNER_TOKENS_KEY) ?? '[]'))
+      .toEqual([{ owner: 'comunica', token: 'org-token' }]));
+  });
+
+  it('are removed on request', async() => {
+    localStorage.setItem(OWNER_TOKENS_KEY, JSON.stringify([{ owner: 'comunica', token: 'abc' }]));
+    await signedIn();
+    expect(screen.getByText('orgs comunica')).toBeDefined();
+    fireEvent.click(screen.getByText('drop org token'));
+    await screen.findByText('orgs none');
+    expect(localStorage.getItem(OWNER_TOKENS_KEY)).toBeNull();
+  });
+
+  it('are loaded at boot and given to the client', async() => {
+    localStorage.setItem(OWNER_TOKENS_KEY, JSON.stringify([{ owner: 'comunica', token: 'abc' }]));
+    await signedIn();
+    expect(constructed.some(entry =>
+      entry.token === 'mine' && entry.ownerTokens.some(owned => owned.owner === 'comunica'))).toBe(true);
+  });
+
+  it('follow the main token into session storage', async() => {
+    sessionStorage.setItem(TOKEN_KEY, 'mine');
+    render(<App />);
+    await screen.findByText('signed in as rubensworks');
+    fireEvent.click(screen.getByText('add org token'));
+    await screen.findByText('orgs comunica');
+    expect(localStorage.getItem(OWNER_TOKENS_KEY)).toBeNull();
+    expect(sessionStorage.getItem(OWNER_TOKENS_KEY)).not.toBeNull();
+  });
+
+  it('survive swapping the main token', async() => {
+    localStorage.setItem(OWNER_TOKENS_KEY, JSON.stringify([{ owner: 'comunica', token: 'abc' }]));
+    await signedIn();
+    fireEvent.click(screen.getByText('swap token kept'));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(OWNER_TOKENS_KEY) ?? '[]'))
+      .toEqual([{ owner: 'comunica', token: 'abc' }]));
+    expect(screen.getByText('orgs comunica')).toBeDefined();
+  });
+
+  it('are wiped by signing out', async() => {
+    localStorage.setItem(OWNER_TOKENS_KEY, JSON.stringify([{ owner: 'comunica', token: 'abc' }]));
+    await signedIn();
+    fireEvent.click(screen.getByText('leave'));
+    await screen.findByText('Actions Overview');
+    expect(localStorage.getItem(OWNER_TOKENS_KEY)).toBeNull();
   });
 });

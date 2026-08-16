@@ -1,5 +1,6 @@
 import { Octokit } from '@octokit/rest';
 import type {
+  IOwnerToken,
   IRateLimit,
   IRepoRef,
   IViewer,
@@ -85,6 +86,17 @@ interface IApiUser {
   login: string;
   name: string | null;
   avatar_url: string;
+}
+
+interface IApiCommitStamp {
+  date?: string;
+}
+
+interface IApiCommitEntry {
+  commit: {
+    author: IApiCommitStamp | null;
+    committer: IApiCommitStamp | null;
+  };
 }
 
 /**
@@ -220,6 +232,7 @@ function toWorkflowRun(run: IApiRun): IWorkflowRun {
  */
 export class GitHubClient {
   private readonly octokit: Octokit;
+  private readonly byOwner = new Map<string, Octokit>();
   private readonly cache = new Map<string, ICacheEntry>();
   private readonly isAnonymous: boolean;
   private rateLimitValue: IRateLimit | undefined;
@@ -227,11 +240,25 @@ export class GitHubClient {
   /**
    * @param token A personal access token, or undefined to talk to the API anonymously.
    *   Anonymous requests only see public data and share a 60 requests per hour budget per IP.
+   * @param ownerTokens Extra tokens, each used for everything one owner owns. A fine-grained
+   *   token reaches a single resource owner, so this is what lets one dashboard hold your own
+   *   repositories and an organisation's private ones at the same time.
    */
-  public constructor(token: string | undefined) {
+  public constructor(token: string | undefined, ownerTokens: IOwnerToken[] = []) {
     const options = { userAgent: 'gh-actions-overview', request: { retries: 0 }};
     this.isAnonymous = token === undefined;
     this.octokit = token === undefined ? new Octokit(options) : new Octokit({ ...options, auth: token });
+    for (const entry of ownerTokens) {
+      this.byOwner.set(entry.owner.toLowerCase(), new Octokit({ ...options, auth: entry.token }));
+    }
+  }
+
+  // Every request naming an owner goes out with that owner's token when one is configured.
+  private clientFor(owner: string | undefined): Octokit {
+    if (owner === undefined) {
+      return this.octokit;
+    }
+    return this.byOwner.get(owner.toLowerCase()) ?? this.octokit;
   }
 
   /**
@@ -274,7 +301,7 @@ export class GitHubClient {
    * @param cutoff Unix timestamp in milliseconds; repositories pushed before this are irrelevant.
    */
   public async listOwnerRepos(login: string, cutoff: number): Promise<IRepoRef[]> {
-    return this.listRepoPages('GET /users/{username}/repos', { username: login }, 'owner', cutoff);
+    return this.listRepoPages('GET /users/{username}/repos', { username: login }, 'owner', cutoff, login);
   }
 
   /**
@@ -289,14 +316,48 @@ export class GitHubClient {
    */
   public async listOrgRepos(org: string, cutoff: number): Promise<IRepoRef[]> {
     try {
-      return await this.listRepoPages('GET /orgs/{org}/repos', { org }, 'org', cutoff);
+      return await this.listRepoPages('GET /orgs/{org}/repos', { org }, 'org', cutoff, org);
     } catch (error: unknown) {
       const status = asHttpError(error)?.status;
       if (status !== 403 && status !== 404) {
         throw error;
       }
-      return this.listRepoPages('GET /users/{username}/repos', { username: org }, 'org', cutoff);
+      return this.listRepoPages('GET /users/{username}/repos', { username: org }, 'org', cutoff, org);
     }
+  }
+
+  /**
+   * Checks that a token can actually list an organisation, so a mistyped or wrongly scoped one is
+   * refused at the point of entry rather than quietly showing only public repositories.
+   *
+   * Deliberately without the public fallback of {@link listOrgRepos}: the whole point of an extra
+   * token is the private repositories, and `GET /orgs/{org}/repos` is exactly the call that a token
+   * belonging to another resource owner cannot make.
+   * @param org An organisation login.
+   */
+  public async checkOrgAccess(org: string): Promise<void> {
+    await this.conditionalRequest('GET /orgs/{org}/repos', { org, per_page: 1 }, org);
+  }
+
+  /**
+   * Fetches when the default branch was last committed to.
+   *
+   * This is the one figure the dashboard cannot get for free — the repository listings carry
+   * `pushed_at`, which covers every branch — so it costs one request per repository and is only
+   * ever asked for while the list is sorted by it.
+   * @param repo A repository reference.
+   */
+  public async getDefaultBranchCommitDate(repo: IRepoRef): Promise<string | undefined> {
+    const { data } = await this.conditionalRequest<IApiCommitEntry[]>(
+      'GET /repos/{owner}/{repo}/commits',
+      { owner: repo.owner, repo: repo.name, sha: repo.defaultBranch, per_page: 1 },
+      repo.owner,
+    );
+    const [ newest ] = data;
+    if (newest === undefined) {
+      return undefined;
+    }
+    return newest.commit.committer?.date ?? newest.commit.author?.date;
   }
 
   /**
@@ -305,7 +366,11 @@ export class GitHubClient {
    * @param name A repository name.
    */
   public async getRepo(owner: string, name: string): Promise<IRepoRef> {
-    const { data } = await this.conditionalRequest<IApiRepo>('GET /repos/{owner}/{repo}', { owner, repo: name });
+    const { data } = await this.conditionalRequest<IApiRepo>(
+      'GET /repos/{owner}/{repo}',
+      { owner, repo: name },
+      owner,
+    );
     return toRepoRef(data, 'manual');
   }
 
@@ -317,6 +382,7 @@ export class GitHubClient {
     const { data } = await this.conditionalRequest<IApiWorkflowList>(
       'GET /repos/{owner}/{repo}/actions/workflows',
       { owner: repo.owner, repo: repo.name, per_page: 100 },
+      repo.owner,
     );
     return data.workflows;
   }
@@ -355,6 +421,7 @@ export class GitHubClient {
     const { data } = await this.conditionalRequest<IApiRunList>(
       'GET /repos/{owner}/{repo}/actions/runs',
       parameters,
+      repo.owner,
     );
     return data.workflow_runs.map(run => toWorkflowRun(run));
   }
@@ -364,6 +431,7 @@ export class GitHubClient {
     parameters: Record<string, unknown>,
     source: RepoSource,
     cutoff: number,
+    owner?: string,
   ): Promise<IRepoRef[]> {
     const result: IRepoRef[] = [];
     for (let page = 1; page <= MAX_REPO_PAGES; page++) {
@@ -372,7 +440,7 @@ export class GitHubClient {
         sort: 'pushed',
         per_page: 100,
         page,
-      });
+      }, owner);
       const refs = data.map(repo => toRepoRef(repo, source));
       result.push(...refs);
       let oldestOnPage = Number.POSITIVE_INFINITY;
@@ -389,6 +457,7 @@ export class GitHubClient {
   private async conditionalRequest<T>(
     route: string,
     parameters: Record<string, unknown>,
+    owner?: string,
   ): Promise<{ data: T; notModified: boolean }> {
     const cacheKey = `${route} ${JSON.stringify(parameters)}`;
     const cached = this.cache.get(cacheKey);
@@ -398,7 +467,7 @@ export class GitHubClient {
     }
 
     try {
-      const response = await this.octokit.request(route, { ...parameters, headers });
+      const response = await this.clientFor(owner).request(route, { ...parameters, headers });
       this.recordRateLimit(<Record<string, unknown>> response.headers);
       const data = <T> <unknown> response.data;
       const etag = response.headers.etag;

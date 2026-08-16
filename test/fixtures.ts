@@ -76,6 +76,8 @@ export function repoState(fullName: string, overrides: Partial<IRepoState> = {})
     lastUpdated: NOW,
     nextRefresh: NOW + 60_000,
     workflowsFetchedAt: NOW,
+    defaultBranchCommitAt: undefined,
+    commitDateFetchedAt: undefined,
     ...overrides,
   };
 }

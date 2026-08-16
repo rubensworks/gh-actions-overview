@@ -88,6 +88,16 @@ export interface IRepoState {
   lastUpdated: number | undefined;
   nextRefresh: number;
   workflowsFetchedAt: number | undefined;
+  /**
+   * When the default branch was last committed to, or undefined while unknown. Only ever fetched
+   * while the dashboard is sorted by it, since it costs one request per repository.
+   */
+  defaultBranchCommitAt: string | undefined;
+  /**
+   * When that lookup last ran, successfully or not, so a failure backs off instead of retrying
+   * on every tick.
+   */
+  commitDateFetchedAt: number | undefined;
 }
 
 export interface IRateLimit {
@@ -125,18 +135,40 @@ export type Theme = 'auto' | 'dark' | 'light';
 export type TokenLocation = 'local' | 'none' | 'session';
 
 /**
+ * An extra token for one owner, used instead of the main token for everything that owner owns.
+ *
+ * A fine-grained token only reaches the resource owner it was created for, so seeing an
+ * organisation's private repositories takes a token of its own. Holding several side by side is
+ * the only way to have your own repositories and an organisation's on one dashboard.
+ */
+export interface IOwnerToken {
+  /**
+   * The user or organisation login this token belongs to, as typed.
+   */
+  owner: string;
+  token: string;
+}
+
+/**
  * The order the repository rows are listed in.
  */
-export type SortKey = 'default-run' | 'name' | 'pushed' | 'run' | 'stars' | 'status';
+export type SortKey = 'commit' | 'default-run' | 'name' | 'pushed' | 'run' | 'stars' | 'status';
 
 export const SORT_LABELS: Record<SortKey, string> = {
   pushed: 'Last push',
+  commit: 'Last commit on default branch',
   'default-run': 'Last default-branch run',
   run: 'Last workflow run',
   status: 'Failing first',
   stars: 'Stars',
   name: 'Name',
 };
+
+/**
+ * The one sort key whose data is not already on hand, and which therefore costs an extra request
+ * per repository. Nothing fetches it until this sort is chosen.
+ */
+export const SORT_NEEDING_COMMIT_DATES: SortKey = 'commit';
 
 export const DEFAULT_SORT: SortKey = 'pushed';
 

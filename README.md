@@ -22,8 +22,11 @@ this app ever talks to is `api.github.com`, straight from your browser.
 - **The default branch is the status.** Each workflow reports its newest run on the repository's
   default branch, however long ago that was. A red feature branch never displaces a green `master`,
   and the failure count and the favicon follow the same rule.
-- **Sorting** by last push, last workflow run, last default-branch run, failures first, stars, or
-  name — part of the URL fragment like every other bit of view state.
+- **Sorting** by last push, last commit on the default branch, last workflow run, last
+  default-branch run, failures first, stars, or name — part of the URL fragment like every other
+  bit of view state.
+- **A token per organisation**, held alongside your own, so one dashboard can show your
+  repositories and an organisation's private ones at the same time.
 - **Smart polling.** Repositories with a queued or running workflow refresh every 15 seconds;
   quiet ones every 2–5 minutes, jittered so requests do not arrive in bursts. Polling pauses
   entirely while the tab is hidden.
@@ -96,11 +99,27 @@ A fine-grained token is bound to a single resource owner, so the one you created
 account **cannot list an organisation's private repositories**. Asking for them comes back as
 `403 Access forbidden`.
 
-Adding an organisation under *Settings → Extra organisations* still works: when the organisation
-listing is refused, the dashboard falls back to the public listing for that login, so you get its
-public repositories and no error. To see the private ones as well, create a **second token with the
-organisation as its resource owner** — which an organisation owner may have to approve first — and
-paste that one in instead.
+Adding an organisation under *Settings → Extra organisations* still works without one: when the
+organisation listing is refused, the dashboard falls back to the public listing for that login, so
+you get its public repositories and no error.
+
+For the private ones, hold a second token **alongside** your own:
+
+1. Create another fine-grained token with the **organisation** as its *resource owner*. An
+   organisation owner may have to approve it before it starts working.
+2. Give it the same **Actions: Read-only**, and pick which of the organisation's repositories it
+   covers.
+3. Paste it into **Settings → Organisation tokens**, together with the organisation's login.
+
+The token is checked against `GET /orgs/{org}/repos` before it is kept — the one call a token
+belonging to a different resource owner cannot make — so a wrongly scoped one is refused there and
+then rather than silently showing only public repositories. Adding it also puts the organisation on
+the dashboard.
+
+From then on, every request about that organisation goes out with its token and everything else
+with yours, so one dashboard can watch both. Organisation tokens live beside the main one, follow
+the same *don't remember me* choice, and are wiped by **Sign out**. The settings panel lists the
+organisations that have a token; it never shows the tokens themselves.
 
 ![The setup screen](docs/screenshots/setup.png)
 
@@ -112,7 +131,8 @@ The short version: **your token never leaves your browser.**
   anything it does — there is nothing to send your token *to*.
 - The token is stored in `localStorage` under `gh-actions-overview:token`, or in `sessionStorage`
   when you tick *“Don't remember me”* on the setup screen. `sessionStorage` is wiped as soon as the
-  tab closes.
+  tab closes. Organisation tokens sit beside it under `gh-actions-overview:owner-tokens`, in the
+  same storage, and are never rendered back into the page.
 - It is attached as an `Authorization` header on requests issued by your browser directly to
   `https://api.github.com`. No other host is ever contacted; there are no third-party scripts,
   fonts, or trackers on the page.
@@ -150,7 +170,9 @@ In **Settings** you can:
 - switch the theme and enable failure notifications;
 - **replace or remove the token**, without signing out first. The panel says where the token is
   stored, a new one is checked against the API before it replaces the old, and removing it drops
-  you to public mode when the fragment names an owner, or back to the setup screen otherwise.
+  you to public mode when the fragment names an owner, or back to the setup screen otherwise;
+- add an **organisation token**, used for that organisation alongside your own token rather than
+  instead of it — see [above](#organisations-need-their-own-token).
 
 ## Which run is shown
 
@@ -182,13 +204,22 @@ The row order is a dropdown in the filter bar, and part of the URL fragment:
 | Sort | What it orders on |
 |------|-------------------|
 | Last push (default) | `pushed_at`, the last push to *any* branch |
-| Last default-branch run | The newest run shown on the row, so the closest free proxy for "last commit on the trunk that ran CI" |
+| Last commit on default branch | The head commit of `master`/`main` itself |
+| Last default-branch run | The newest run shown on the row |
 | Last workflow run | The newest run on any branch, bot branches included |
 | Failing first | Failing, then running, then everything else |
 | Stars | `stargazers_count`, descending |
 | Name | `owner/name`, so owners stay grouped |
 
 Ties fall back to the last push, and then to the name, so the order is stable across refreshes.
+
+Every one of these is free except **last commit on default branch**: the repository listings carry
+`pushed_at`, which counts pushes to any branch, and the real per-branch answer takes a
+`GET /repos/{owner}/{repo}/commits?sha=<default>&per_page=1` for each repository. So nothing fetches
+it until you pick that sort, at which point the dates fill in six repositories at a time and
+refresh every 10 minutes. Those requests are conditional too, so the refreshes are answered `304`
+and cost no quota. Pick a different sort and the lookups stop; repositories whose date is not known
+yet sort to the bottom.
 
 Settings are persisted in `localStorage`. The view — the owner being browsed and every filter —
 is persisted in the URL fragment (`#owner=comunica&failures=1`), which browsers never send to a

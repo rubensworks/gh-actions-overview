@@ -4,7 +4,8 @@ import { applyOverallStatus } from '../lib/favicon';
 import type { GitHubClient } from '../lib/githubClient';
 import { notifyFailure } from '../lib/notifications';
 import { summarize } from '../lib/selectors';
-import type { IFilters, ISettings, IViewer, TokenLocation } from '../lib/types';
+import type { IFilters, IOwnerToken, ISettings, IViewer, TokenLocation } from '../lib/types';
+import { SORT_NEEDING_COMMIT_DATES } from '../lib/types';
 import { readFilters, writeUrlState } from '../lib/urlState';
 import { FilterBar } from './filter-bar';
 import { RepoDrawer } from './repo-drawer';
@@ -26,9 +27,12 @@ export interface IDashboardProps {
   owner: string | undefined;
   settings: ISettings;
   tokenLocation: TokenLocation;
+  ownerTokens: IOwnerToken[];
   onSettingsChange: (settings: ISettings) => void;
   onTokenSave: (token: string, remember: boolean) => Promise<void>;
   onTokenRemove: () => void;
+  onOwnerTokenSave: (owner: string, token: string) => Promise<void>;
+  onOwnerTokenRemove: (owner: string) => void;
   onLeave: () => void;
 }
 
@@ -37,7 +41,7 @@ export interface IDashboardProps {
  */
 export function Dashboard(props: IDashboardProps) {
   const { client, viewer, owner, settings, tokenLocation, onSettingsChange, onLeave } = props;
-  const { onTokenSave, onTokenRemove } = props;
+  const { onTokenSave, onTokenRemove, ownerTokens, onOwnerTokenSave, onOwnerTokenRemove } = props;
 
   const [ filters, setFilters ] = useState<IFilters>(() => readFilters(location.hash));
   const [ now, setNow ] = useState(() => Date.now());
@@ -79,6 +83,12 @@ export function Dashboard(props: IDashboardProps) {
   useEffect(() => {
     writeUrlState(owner ?? '', filters);
   }, [ owner, filters ]);
+
+  // The default-branch commit date costs a request per repository, so it is only ever fetched
+  // while the list is actually sorted by it.
+  useEffect(() => {
+    store.setCommitDatesWanted(filters.sort === SORT_NEEDING_COMMIT_DATES);
+  }, [ store, filters.sort ]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), CLOCK_INTERVAL_MS);
@@ -140,9 +150,12 @@ export function Dashboard(props: IDashboardProps) {
             <SettingsPanel
               settings={settings}
               tokenLocation={tokenLocation}
+              ownerTokens={ownerTokens}
               onChange={onSettingsChange}
               onTokenSave={onTokenSave}
               onTokenRemove={onTokenRemove}
+              onOwnerTokenSave={onOwnerTokenSave}
+              onOwnerTokenRemove={onOwnerTokenRemove}
             />
           ) :
         null}

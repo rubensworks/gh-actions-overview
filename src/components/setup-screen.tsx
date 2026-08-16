@@ -149,12 +149,14 @@ export function SetupScreen({ onConnect, onBrowse, initialError }: ISetupScreenP
             with no permissions selected already works — it just cannot see anything private.
           </p>
           <p className="setup__note">
-            <strong>Organisations</strong> are a separate token. Because a token is bound to one
+            <strong>Organisations take a token of their own.</strong> Because a token is bound to one
             resource owner, the one you made for your own account cannot list an organisation&apos;s
-            private repositories, and asking for them comes back as <em>access forbidden</em>. Adding
-            an organisation in the settings still works — the dashboard falls back to its public
-            repositories. For the private ones, create a second token with the organisation as its
-            resource owner, which an organisation owner may have to approve first.
+            private repositories. Adding an organisation in the settings still works — the dashboard
+            falls back to its public repositories — and for the private ones, create a second token
+            with the organisation as its <em>resource owner</em> (an organisation owner may have to
+            approve it) and paste it into <strong>Settings → Organisation tokens</strong>. It is used
+            for that organisation alongside this one, not instead of it, so you can watch both at
+            once.
           </p>
           <p className="setup__note">
             No write scopes, no account permissions, and no classic-PAT scopes are needed anywhere.

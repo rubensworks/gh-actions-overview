@@ -20,6 +20,8 @@ const IDLE_MAX_MS = 300_000;
 const REPO_LIST_REFRESH_MS = 600_000;
 const WORKFLOW_LIST_REFRESH_MS = 900_000;
 const NO_ACTIONS_REFRESH_MS = 1_800_000;
+// How long a default-branch commit date stays good enough to sort on.
+const COMMIT_DATE_REFRESH_MS = 600_000;
 const ERROR_REFRESH_MS = 300_000;
 const CONCURRENCY = 6;
 // Polling slows down by this factor once the quota gets low.
@@ -101,6 +103,8 @@ export class DashboardStore {
   private timer: number | undefined;
   private repoListFetchedAt = 0;
   private repoListInFlight = false;
+  private commitDatesWanted = false;
+  private readonly commitInFlight = new Set<string>();
   private readonly onVisibilityChange: () => void;
 
   public constructor(
@@ -184,6 +188,23 @@ export class DashboardStore {
     this.tick();
   }
 
+  /**
+   * Turns the default-branch commit lookup on or off.
+   *
+   * It is off until the list is sorted by that date, because it is the one figure that costs an
+   * extra request per repository. Turning it on starts filling the gaps on the next tick.
+   * @param wanted Whether the commit dates are needed.
+   */
+  public setCommitDatesWanted(wanted: boolean): void {
+    if (wanted === this.commitDatesWanted) {
+      return;
+    }
+    this.commitDatesWanted = wanted;
+    if (wanted) {
+      this.tick();
+    }
+  }
+
   private tick(): void {
     const now = Date.now();
     if (document.hidden) {
@@ -206,6 +227,10 @@ export class DashboardStore {
       this.refreshRepoList().catch(ignoreRejection);
     }
 
+    if (this.commitDatesWanted) {
+      this.refreshCommitDates(now);
+    }
+
     const slots = CONCURRENCY - this.inFlight.size;
     if (slots <= 0) {
       return;
@@ -216,6 +241,41 @@ export class DashboardStore {
       .slice(0, slots);
     for (const repo of due) {
       this.refreshRepo(repo).catch(ignoreRejection);
+    }
+  }
+
+  private refreshCommitDates(now: number): void {
+    const slots = CONCURRENCY - this.commitInFlight.size;
+    if (slots <= 0) {
+      return;
+    }
+    const due = this.state.repos
+      .filter((repo) => {
+        if (this.commitInFlight.has(repo.repo.key)) {
+          return false;
+        }
+        const fetchedAt = repo.commitDateFetchedAt;
+        return fetchedAt === undefined || now - fetchedAt >= COMMIT_DATE_REFRESH_MS;
+      })
+      .slice(0, slots);
+    for (const repo of due) {
+      this.fetchCommitDate(repo.repo).catch(ignoreRejection);
+    }
+  }
+
+  private async fetchCommitDate(ref: IRepoRef): Promise<void> {
+    this.commitInFlight.add(ref.key);
+    try {
+      const committedAt = await this.client.getDefaultBranchCommitDate(ref);
+      this.updateRepo(ref.key, { defaultBranchCommitAt: committedAt });
+    } catch (error: unknown) {
+      // An empty or unreadable repository simply has no date; it sorts last rather than breaking
+      // the list. The stamp below stops it from being retried on every tick.
+      this.handleGlobalError(error);
+    } finally {
+      this.commitInFlight.delete(ref.key);
+      this.updateRepo(ref.key, { commitDateFetchedAt: Date.now() });
+      this.patch({ rateLimit: this.client.rateLimit });
     }
   }
 
@@ -336,6 +396,8 @@ export class DashboardStore {
           lastUpdated: undefined,
           nextRefresh: 0,
           workflowsFetchedAt: undefined,
+          defaultBranchCommitAt: undefined,
+          commitDateFetchedAt: undefined,
         };
       }
       return { ...previous, repo: ref };

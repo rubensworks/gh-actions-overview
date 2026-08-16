@@ -230,6 +230,26 @@ describe('sortRepos', () => {
     expect(order('stars')).toEqual([ 'old', 'side', 'recent' ]);
   });
 
+  it('sorts by the last commit on the default branch', () => {
+    const stale = repoState('e/stale', {
+      repo: repoRef('e/stale', { pushedAt: '2026-04-28T00:00:00Z' }),
+      defaultBranchCommitAt: '2026-01-01T00:00:00Z',
+    });
+    const fresh = repoState('f/fresh', {
+      repo: repoRef('f/fresh', { pushedAt: '2026-01-02T00:00:00Z' }),
+      defaultBranchCommitAt: '2026-04-25T00:00:00Z',
+    });
+    expect(sortRepos([ stale, fresh ], 'commit').map(repo => repo.repo.name))
+      .toEqual([ 'fresh', 'stale' ]);
+  });
+
+  it('sorts a repository whose commit date is unknown to the bottom', () => {
+    const known = repoState('g/known', { defaultBranchCommitAt: '2020-01-01T00:00:00Z' });
+    const unknown = repoState('h/unknown');
+    expect(sortRepos([ unknown, known ], 'commit').map(repo => repo.repo.name))
+      .toEqual([ 'known', 'unknown' ]);
+  });
+
   it('sorts by the last run on any branch', () => {
     expect(order('run')).toEqual([ 'side', 'recent', 'old' ]);
   });

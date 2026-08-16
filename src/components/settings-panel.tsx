@@ -1,13 +1,19 @@
 import { useEffect, useState } from 'react';
 import { notificationPermission, requestNotificationPermission } from '../lib/notifications';
-import type { ISettings, Theme, TokenLocation } from '../lib/types';
+import type { IOwnerToken, ISettings, Theme, TokenLocation } from '../lib/types';
 
 export interface ISettingsPanelProps {
   settings: ISettings;
   tokenLocation: TokenLocation;
+  /**
+   * Extra tokens, one per owner, shown by owner only — the tokens themselves are never rendered.
+   */
+  ownerTokens: IOwnerToken[];
   onChange: (settings: ISettings) => void;
   onTokenSave: (token: string, remember: boolean) => Promise<void>;
   onTokenRemove: () => void;
+  onOwnerTokenSave: (owner: string, token: string) => Promise<void>;
+  onOwnerTokenRemove: (owner: string) => void;
 }
 
 const TOKEN_STATUS: Record<TokenLocation, string> = {
@@ -28,6 +34,11 @@ function toList(value: string): string[] {
  */
 export function SettingsPanel(props: ISettingsPanelProps) {
   const { settings, tokenLocation, onChange, onTokenSave, onTokenRemove } = props;
+  const { ownerTokens, onOwnerTokenSave, onOwnerTokenRemove } = props;
+  const [ ownerDraft, setOwnerDraft ] = useState('');
+  const [ ownerTokenDraft, setOwnerTokenDraft ] = useState('');
+  const [ ownerBusy, setOwnerBusy ] = useState(false);
+  const [ ownerError, setOwnerError ] = useState<string | undefined>();
   const [ orgsDraft, setOrgsDraft ] = useState(settings.orgs.join('\n'));
   const [ reposDraft, setReposDraft ] = useState(settings.extraRepos.join('\n'));
   const [ permission, setPermission ] = useState(notificationPermission());
@@ -70,6 +81,27 @@ export function SettingsPanel(props: ISettingsPanelProps) {
       setTokenError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setTokenBusy(false);
+    }
+  }
+
+  async function submitOwnerToken(event: React.FormEvent) {
+    event.preventDefault();
+    const owner = ownerDraft.trim().replace(/^@/u, '');
+    const token = ownerTokenDraft.trim();
+    if (owner.length === 0 || token.length === 0) {
+      setOwnerError('Both an organisation and a token are needed.');
+      return;
+    }
+    setOwnerBusy(true);
+    setOwnerError(undefined);
+    try {
+      await onOwnerTokenSave(owner, token);
+      setOwnerDraft('');
+      setOwnerTokenDraft('');
+    } catch (cause: unknown) {
+      setOwnerError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setOwnerBusy(false);
     }
   }
 
@@ -165,9 +197,7 @@ export function SettingsPanel(props: ISettingsPanelProps) {
 
       <p className="settings__hint">
         Pinned repositories are always shown, even when they fall outside the push window. An
-        organisation your token was not created for still lists its public repositories: a
-        fine-grained token only reaches its own resource owner, so seeing an organisation&apos;s
-        private repositories takes a second token created with that organisation as the owner.
+        organisation with no token of its own below shows only its public repositories.
       </p>
 
       <form className="settings__token" onSubmit={submitToken}>
@@ -210,6 +240,64 @@ export function SettingsPanel(props: ISettingsPanelProps) {
           null :
           <p className="settings__token-error" role="alert">{tokenError}</p>}
         {tokenSaved ? <p className="settings__token-ok">Token saved.</p> : null}
+      </form>
+
+      <form className="settings__token" onSubmit={submitOwnerToken}>
+        <span className="settings__label">Organisation tokens</span>
+        <p className="settings__hint settings__hint--status">
+          A fine-grained token reaches one resource owner, so an organisation&apos;s private
+          repositories need a token of their own. Add it here and it is used for everything that
+          organisation owns, alongside your own token rather than instead of it.
+        </p>
+
+        {ownerTokens.length === 0 ?
+          null :
+            (
+              <ul className="settings__owner-list">
+                {ownerTokens.map(entry => (
+                  <li className="settings__owner" key={entry.owner}>
+                    <span className="settings__owner-name">{entry.owner}</span>
+                    <button
+                      className="button button--danger"
+                      type="button"
+                      onClick={() => onOwnerTokenRemove(entry.owner)}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+        <div className="settings__inline settings__inline--wrap">
+          <input
+            className="settings__owner-input"
+            type="text"
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            placeholder="comunica"
+            aria-label="Organisation login"
+            value={ownerDraft}
+            onChange={event => setOwnerDraft(event.target.value)}
+          />
+          <input
+            className="settings__token-input"
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="github_pat_..."
+            aria-label="Token for this organisation"
+            value={ownerTokenDraft}
+            onChange={event => setOwnerTokenDraft(event.target.value)}
+          />
+          <button className="button" type="submit" disabled={ownerBusy}>
+            {ownerBusy ? 'Checking…' : 'Add organisation token'}
+          </button>
+        </div>
+        {ownerError === undefined ?
+          null :
+          <p className="settings__token-error" role="alert">{ownerError}</p>}
       </form>
     </div>
   );

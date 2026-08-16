@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_SETTINGS,
+  clearOwnerTokens,
   clearToken,
+  loadOwnerTokens,
   loadSettings,
   loadToken,
+  saveOwnerTokens,
   saveSettings,
   saveToken,
 } from '../src/lib/storage';
@@ -178,5 +181,74 @@ describe('saveSettings', () => {
   it('round-trips through storage', () => {
     saveSettings(CUSTOM);
     expect(loadSettings()).toEqual(CUSTOM);
+  });
+});
+
+describe('owner tokens', () => {
+  it('are empty when nothing is stored', () => {
+    expect(loadOwnerTokens()).toEqual([]);
+  });
+
+  it('round-trip through local storage', () => {
+    saveOwnerTokens([{ owner: 'comunica', token: 'abc' }], true);
+    expect(localStorage.getItem('gh-actions-overview:owner-tokens')).not.toBeNull();
+    expect(loadOwnerTokens()).toEqual([{ owner: 'comunica', token: 'abc' }]);
+  });
+
+  it('round-trip through session storage when not remembered', () => {
+    saveOwnerTokens([{ owner: 'comunica', token: 'abc' }], false);
+    expect(localStorage.getItem('gh-actions-overview:owner-tokens')).toBeNull();
+    expect(loadOwnerTokens()).toEqual([{ owner: 'comunica', token: 'abc' }]);
+  });
+
+  it('prefer the session copy over the local one', () => {
+    saveOwnerTokens([{ owner: 'local', token: 'a' }], true);
+    sessionStorage.setItem(
+      'gh-actions-overview:owner-tokens',
+      JSON.stringify([{ owner: 'session', token: 'b' }]),
+    );
+    expect(loadOwnerTokens()).toEqual([{ owner: 'session', token: 'b' }]);
+  });
+
+  it('are cleared before being rewritten, so they never linger in two storages', () => {
+    saveOwnerTokens([{ owner: 'comunica', token: 'abc' }], true);
+    saveOwnerTokens([{ owner: 'comunica', token: 'abc' }], false);
+    expect(localStorage.getItem('gh-actions-overview:owner-tokens')).toBeNull();
+  });
+
+  it('writing an empty list stores nothing at all', () => {
+    saveOwnerTokens([{ owner: 'comunica', token: 'abc' }], true);
+    saveOwnerTokens([], true);
+    expect(localStorage.getItem('gh-actions-overview:owner-tokens')).toBeNull();
+    expect(loadOwnerTokens()).toEqual([]);
+  });
+
+  it('are removed from both storages', () => {
+    saveOwnerTokens([{ owner: 'a', token: 'b' }], true);
+    clearOwnerTokens();
+    expect(loadOwnerTokens()).toEqual([]);
+  });
+
+  it('ignore malformed JSON', () => {
+    localStorage.setItem('gh-actions-overview:owner-tokens', 'not json');
+    expect(loadOwnerTokens()).toEqual([]);
+  });
+
+  it('ignore a payload that is not an array', () => {
+    localStorage.setItem('gh-actions-overview:owner-tokens', '{"owner":"a"}');
+    expect(loadOwnerTokens()).toEqual([]);
+  });
+
+  it('drop entries that are not a complete owner and token', () => {
+    localStorage.setItem('gh-actions-overview:owner-tokens', JSON.stringify([
+      { owner: 'good', token: 'yes' },
+      { owner: 'no token' },
+      { token: 'no owner' },
+      { owner: '', token: 'empty owner' },
+      { owner: 'empty token', token: '' },
+      'nonsense',
+      null,
+    ]));
+    expect(loadOwnerTokens()).toEqual([{ owner: 'good', token: 'yes' }]);
   });
 });
