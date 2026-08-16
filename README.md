@@ -1,6 +1,7 @@
 # GitHub Actions Overview
 
-[![CI](https://github.com/rubensworks/gh-actions-overview/workflows/CI/badge.svg)](https://github.com/rubensworks/gh-actions-overview/actions?query=workflow%3ACI)
+[![Build status](https://github.com/rubensworks/gh-actions-overview/workflows/CI/badge.svg)](https://github.com/rubensworks/gh-actions-overview/actions?query=workflow%3ACI)
+[![Coverage Status](https://coveralls.io/repos/github/rubensworks/gh-actions-overview/badge.svg?branch=master)](https://coveralls.io/github/rubensworks/gh-actions-overview?branch=master)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 A dashboard for all your GitHub Actions, in the spirit of the old Travis CI overview: one dense row
@@ -137,7 +138,8 @@ npm run preview    # Serve the production build
 
 The suite covers **100% of statements, branches, functions and lines**, and the coverage thresholds
 in [`vite.config.ts`](vite.config.ts) are set to 100, so CI fails the moment a line stops being
-covered.
+covered. Tests run on Node 22, 24 and 26, and each run reports its `lcov` to
+[Coveralls](https://coveralls.io/github/rubensworks/gh-actions-overview).
 
 Tests live in `test/`, mirroring `src/`. There are no live network calls anywhere: `@octokit/rest`
 is mocked at the module boundary for the client tests, and the polling store is driven with fake
