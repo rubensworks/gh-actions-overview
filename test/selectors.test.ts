@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { sortRepos, summarize } from '../src/lib/selectors';
-import type { IFilters, SortKey } from '../src/lib/types';
+import { repoStatus, sortRepos, summarize } from '../src/lib/selectors';
+import type { IFilters, IRepoState, SortKey } from '../src/lib/types';
 import { EMPTY_FILTERS } from '../src/lib/urlState';
 import { offTrunkGroup, repoRef, repoState, workflowGroup, workflowRun } from './fixtures';
 
@@ -258,8 +258,9 @@ describe('sortRepos', () => {
     expect(order('default-run')).toEqual([ 'recent', 'old', 'side' ]);
   });
 
+  // The off-trunk repository is neither failing nor running nor green: it sorts below the green one.
   it('sorts failing repositories first, and discounts an off-trunk running one', () => {
-    expect(order('status')).toEqual([ 'recent', 'side', 'old' ]);
+    expect(order('status')).toEqual([ 'recent', 'old', 'side' ]);
   });
 
   it('sorts a running default branch above a quiet one, and below a failing one', () => {
@@ -317,8 +318,9 @@ describe('workflows that never ran on the default branch', () => {
     expect(summarize([ repo ], filters()).runningCount).toBe(0);
   });
 
-  it('leave the overall status green rather than red', () => {
-    expect(summarize([ sideBranchOnly ], filters()).overall).toBe('success');
+  // Not red, and not green either: nothing is known about the trunk, so the tab says nothing.
+  it('leave the overall status grey rather than red', () => {
+    expect(summarize([ sideBranchOnly ], filters()).overall).toBe('idle');
   });
 
   it('are hidden by the failures filter', () => {
@@ -331,5 +333,90 @@ describe('workflows that never ran on the default branch', () => {
 
   it('are still listed, so the repository does not silently vanish', () => {
     expect(summarize([ sideBranchOnly ], filters()).visible).toEqual([ sideBranchOnly ]);
+  });
+});
+
+describe('repoStatus', () => {
+  function repoWith(...states: Parameters<typeof workflowRun>[0][]): IRepoState {
+    return repoState('a/b', {
+      workflows: states.map((state, index) =>
+        workflowGroup(`W${index}`, [ workflowRun(state) ], index + 1)),
+    });
+  }
+
+  it('is green when the default branch succeeded', () => {
+    expect(repoStatus(repoWith('success', 'success'))).toBe('success');
+  });
+
+  it('is green when the other workflows were merely skipped', () => {
+    expect(repoStatus(repoWith('success', 'skipped'))).toBe('success');
+  });
+
+  it('is red as soon as one workflow fails', () => {
+    expect(repoStatus(repoWith('success', 'failure'))).toBe('failure');
+  });
+
+  it('is red rather than yellow when both apply', () => {
+    expect(repoStatus(repoWith('failure', 'running'))).toBe('failure');
+  });
+
+  it('is yellow while something is running', () => {
+    expect(repoStatus(repoWith('success', 'running'))).toBe('running');
+  });
+
+  it('is yellow for a queued run', () => {
+    expect(repoStatus(repoWith('queued'))).toBe('running');
+  });
+
+  it('is grey when nothing on the trunk succeeded, failed or is running', () => {
+    expect(repoStatus(repoWith('cancelled', 'neutral'))).toBe('idle');
+  });
+
+  it('is grey for a repository with no workflows at all', () => {
+    expect(repoStatus(repoState('a/b', { workflows: []}))).toBe('idle');
+  });
+
+  it('is grey when every run was on a side branch', () => {
+    const repo = repoState('a/b', {
+      workflows: [ offTrunkGroup('CI', [ workflowRun('failure', { branch: 'spike' }) ]) ],
+    });
+    expect(repoStatus(repo)).toBe('idle');
+  });
+});
+
+// The point of deriving both from repoStatus: the tab can never claim something no row shows.
+describe('the tab agrees with the rows', () => {
+  const green = repoState('a/green');
+  const red = repoState('a/red', { workflows: [ workflowGroup('CI', [ workflowRun('failure') ]) ]});
+  const yellow = repoState('a/yellow', { workflows: [ workflowGroup('CI', [ workflowRun('running') ]) ]});
+  const grey = repoState('a/grey', { workflows: []});
+
+  it('is green when every row is green', () => {
+    const repos = [ green, repoState('a/green2') ];
+    expect(repos.every(repo => repoStatus(repo) === 'success')).toBe(true);
+    expect(summarize(repos, filters()).overall).toBe('success');
+  });
+
+  it('is red when any row is red', () => {
+    expect(summarize([ green, yellow, red ], filters()).overall).toBe('failure');
+  });
+
+  it('is yellow when a row is running and none is red', () => {
+    expect(summarize([ green, yellow, grey ], filters()).overall).toBe('running');
+  });
+
+  it('is grey when no row has anything to say', () => {
+    expect(summarize([ grey ], filters()).overall).toBe('idle');
+  });
+
+  it('is grey for an empty dashboard', () => {
+    expect(summarize([], filters()).overall).toBe('idle');
+  });
+
+  it('never reports a status that no row shows', () => {
+    for (const repos of [[ green ], [ red ], [ yellow ], [ grey ], [ green, red, yellow, grey ]]) {
+      const { overall } = summarize(repos, filters());
+      expect(repos.map(repo => repoStatus(repo))).toContain(overall);
+    }
   });
 });

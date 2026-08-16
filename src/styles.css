@@ -643,9 +643,20 @@ code {
   display: grid;
   grid-template-columns: minmax(180px, 250px) minmax(0, 1fr);
   gap: 12px;
-  padding: 6px 14px;
+  /* The left padding is 3px short, so the status rule below sits inside the same 14px inset. */
+  padding: 6px 14px 6px 11px;
   border-bottom: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--border);
 }
+
+/*
+ * The status rule: the state of a long list, readable straight down the margin. Every row has one,
+ * so a grey rule for a default branch that never ran keeps the column of names aligned.
+ */
+.repo-row--success { border-left-color: var(--success); }
+.repo-row--failure { border-left-color: var(--failure); }
+.repo-row--running { border-left-color: var(--running); }
+.repo-row--idle { border-left-color: var(--border); }
 
 .repo-row:hover {
   background: var(--bg-elevated);
@@ -657,7 +668,9 @@ code {
 }
 
 .repo-row__name {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 5px;
   width: 100%;
   padding: 0;
   border: 0;
@@ -672,9 +685,17 @@ code {
   white-space: nowrap;
 }
 
+/* Only the text ellipsises; the status icon in front of it must not be squeezed away. */
+.repo-row__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Underlined on hover, but never recoloured: the name's colour is its status. */
 .repo-row__name:hover .repo-row__repo {
   text-decoration: underline;
-  color: var(--accent);
 }
 
 .repo-row__owner {
@@ -684,6 +705,10 @@ code {
 .repo-row__repo {
   font-weight: 600;
 }
+
+.repo-row--success .repo-row__repo { color: var(--success); }
+.repo-row--failure .repo-row__repo { color: var(--failure); }
+.repo-row--running .repo-row__repo { color: var(--running); }
 
 .repo-row__badges {
   display: flex;
@@ -1102,7 +1127,8 @@ a.run--off-trunk:hover {
   .repo-row {
     grid-template-columns: minmax(0, 1fr);
     gap: 4px;
-    padding: 8px 12px;
+    /* Same 3px trade as on the desktop layout, so the status rule keeps its place. */
+    padding: 8px 12px 8px 9px;
   }
 
   .repo-row__name {
