@@ -48,6 +48,13 @@ function lastDefaultBranchRun(repo: IRepoState): number {
   return newestRun(primaryRuns(repo.workflows));
 }
 
+// Unknown sorts last, like every other missing timestamp.
+function lastCommit(repo: IRepoState): number {
+  return repo.defaultBranchCommitAt === undefined ?
+    Number.NEGATIVE_INFINITY :
+    Date.parse(repo.defaultBranchCommitAt);
+}
+
 function lastRun(repo: IRepoState): number {
   return newestRun(repo.workflows.flatMap(group => group.runs));
 }
@@ -67,6 +74,8 @@ function compareBy(sort: SortKey, left: IRepoState, right: IRepoState): number {
       return left.repo.fullName.localeCompare(right.repo.fullName);
     case 'stars':
       return right.repo.stars - left.repo.stars;
+    case 'commit':
+      return lastCommit(right) - lastCommit(left);
     case 'run':
       return lastRun(right) - lastRun(left);
     case 'default-run':

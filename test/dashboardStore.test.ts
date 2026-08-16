@@ -21,6 +21,7 @@ interface IFakeClient {
   listOwnerRepos: Mock<(login: string, cutoff: number) => Promise<IRepoRef[]>>;
   listWorkflows: Mock<(repo: IRepoRef) => Promise<IWorkflowDefinition[]>>;
   listRuns: Mock<(repo: IRepoRef, workflows: IWorkflowDefinition[]) => Promise<IWorkflowGroup[]>>;
+  getDefaultBranchCommitDate: Mock<(repo: IRepoRef) => Promise<string | undefined>>;
 }
 
 class HttpError extends Error {
@@ -44,6 +45,7 @@ function makeClient(): IFakeClient {
     listWorkflows: vi.fn(async(): Promise<IWorkflowDefinition[]> => [ CI ]),
     listRuns: vi.fn(async(): Promise<IWorkflowGroup[]> =>
       [ workflowGroup('CI', [ workflowRun('success') ]) ]),
+    getDefaultBranchCommitDate: vi.fn(async(): Promise<string | undefined> => '2026-04-20T08:00:00Z'),
   };
 }
 
@@ -772,6 +774,125 @@ describe('state updates', () => {
     await boot(store);
     expect(repoByKey(store, 'a/one')?.workflows[0]?.runs[0]?.state).toBe('failure');
     expect(repoByKey(store, 'a/two')?.workflows[0]?.runs[0]?.state).toBe('success');
+    store.stop();
+  });
+});
+
+// The default-branch commit date is the one figure that costs an extra request per repository,
+// so nothing asks for it until the list is actually sorted by it.
+describe('default-branch commit dates', () => {
+  it('are not fetched by default', async() => {
+    const { store, client } = harness();
+    await boot(store);
+    expect(client.getDefaultBranchCommitDate).not.toHaveBeenCalled();
+    store.stop();
+  });
+
+  it('are fetched once the sort asks for them', async() => {
+    const { store, client } = harness();
+    await boot(store);
+    store.setCommitDatesWanted(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.getDefaultBranchCommitDate).toHaveBeenCalledWith(
+      expect.objectContaining({ key: 'rubensworks/jbr.js' }),
+    );
+    expect(repoByKey(store, 'rubensworks/jbr.js')?.defaultBranchCommitAt).toBe('2026-04-20T08:00:00Z');
+    store.stop();
+  });
+
+  it('stop being fetched again once known', async() => {
+    const { store, client } = harness();
+    await boot(store);
+    store.setCommitDatesWanted(true);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(client.getDefaultBranchCommitDate).toHaveBeenCalledTimes(1);
+    store.stop();
+  });
+
+  it('are refreshed once they go stale', async() => {
+    const { store, client } = harness();
+    await boot(store);
+    store.setCommitDatesWanted(true);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(client.getDefaultBranchCommitDate.mock.calls.length).toBeGreaterThan(1);
+    store.stop();
+  });
+
+  it('ignore a repeated request to turn them on', async() => {
+    const { store, client } = harness();
+    await boot(store);
+    store.setCommitDatesWanted(true);
+    store.setCommitDatesWanted(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.getDefaultBranchCommitDate).toHaveBeenCalledTimes(1);
+    store.stop();
+  });
+
+  it('are not fetched again after the sort moves on', async() => {
+    const { store, client } = harness();
+    await boot(store);
+    store.setCommitDatesWanted(true);
+    await vi.advanceTimersByTimeAsync(0);
+    store.setCommitDatesWanted(false);
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(client.getDefaultBranchCommitDate).toHaveBeenCalledTimes(1);
+    store.stop();
+  });
+
+  it('survive a repository that has none, without retrying it every tick', async() => {
+    const client = makeClient();
+    client.getDefaultBranchCommitDate.mockRejectedValue(new HttpError(409, 'Git Repository is empty'));
+    const { store } = harness({}, client);
+    await boot(store);
+    store.setCommitDatesWanted(true);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(client.getDefaultBranchCommitDate).toHaveBeenCalledTimes(1);
+    expect(repoByKey(store, 'rubensworks/jbr.js')?.defaultBranchCommitAt).toBeUndefined();
+    store.stop();
+  });
+
+  it('skip a repository whose lookup is still in flight', async() => {
+    const client = makeClient();
+    client.listUserRepos.mockResolvedValue(
+      Array.from({ length: 7 }, (_unused, index) => repoRef(`rubensworks/repo-${index}`)),
+    );
+    // One lookup never settles, so the next tick has free slots while that one is still out.
+    client.getDefaultBranchCommitDate.mockImplementation(async(repo: IRepoRef) =>
+      (repo.key === 'rubensworks/repo-0' ? new Promise<string>(() => {}) : '2026-04-20T08:00:00Z'));
+    const { store } = harness({}, client);
+    await boot(store);
+    store.setCommitDatesWanted(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.getDefaultBranchCommitDate).toHaveBeenCalledTimes(6);
+    await vi.advanceTimersByTimeAsync(2000);
+    // The seventh is picked up; the one still in flight is not asked again.
+    expect(client.getDefaultBranchCommitDate).toHaveBeenCalledTimes(7);
+    store.stop();
+  });
+
+  it('do not run while more than six are already in flight', async() => {
+    const client = makeClient();
+    client.listUserRepos.mockResolvedValue(
+      Array.from({ length: 9 }, (_unused, index) => repoRef(`rubensworks/repo-${index}`)),
+    );
+    let release = (): void => {};
+    const blocked = new Promise<string>((resolve) => {
+      release = (): void => resolve('2026-04-20T08:00:00Z');
+    });
+    client.getDefaultBranchCommitDate.mockReturnValue(blocked);
+    const { store } = harness({}, client);
+    await boot(store);
+    store.setCommitDatesWanted(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.getDefaultBranchCommitDate).toHaveBeenCalledTimes(6);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(client.getDefaultBranchCommitDate).toHaveBeenCalledTimes(6);
+    release();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(client.getDefaultBranchCommitDate).toHaveBeenCalledTimes(9);
     store.stop();
   });
 });

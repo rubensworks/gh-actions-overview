@@ -591,6 +591,42 @@ code {
   color: var(--success);
 }
 
+.settings__owner-input {
+  flex: 0 1 160px;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.settings__owner-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings__owner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 2px 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.settings__owner-name {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
 /* ------------------------------------------------------------------- rows */
 
 .repos {

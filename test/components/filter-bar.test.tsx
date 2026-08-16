@@ -93,6 +93,7 @@ describe('FilterBar sorting', () => {
     const options = within(screen.getByLabelText('Sort repositories by')).getAllByRole('option');
     expect(options.map(option => option.textContent)).toEqual([
       'Sort: Last push',
+      'Sort: Last commit on default branch',
       'Sort: Last default-branch run',
       'Sort: Last workflow run',
       'Sort: Failing first',

@@ -568,11 +568,69 @@ describe('GitHubClient', () => {
       expect(requestMock).toHaveBeenCalledTimes(1);
     });
 
+    it('uses the organisation token when one is configured', async() => {
+      requestMock.mockResolvedValue(response([ apiRepo('comunica', '2026-05-01T00:00:00Z') ]));
+      await new GitHubClient('mine', [{ owner: 'Comunica', token: 'theirs' }]).listOrgRepos('comunica', 0);
+      // Two Octokits are built, and the organisation's is the one asked.
+      expect(constructorMock).toHaveBeenCalledTimes(2);
+      expect(constructorMock).toHaveBeenLastCalledWith(expect.objectContaining({ auth: 'theirs' }));
+    });
+
     it('rethrows when the public listing fails too', async() => {
       requestMock
         .mockRejectedValueOnce(new HttpError(403, 'Resource not accessible'))
         .mockRejectedValueOnce(new HttpError(404, 'Not Found'));
       await expect(new GitHubClient('t').listOrgRepos('nope', 0)).rejects.toThrow('Not Found');
+    });
+  });
+
+  describe('checkOrgAccess', () => {
+    it('accepts a token that can list the organisation', async() => {
+      requestMock.mockResolvedValue(response([]));
+      await expect(new GitHubClient('t').checkOrgAccess('comunica')).resolves.toBeUndefined();
+      expect(requestMock).toHaveBeenCalledWith(
+        'GET /orgs/{org}/repos',
+        expect.objectContaining({ org: 'comunica', per_page: 1 }),
+      );
+    });
+
+    // Deliberately no public fallback: the point of the token is the private repositories.
+    it('rejects a token scoped to another resource owner', async() => {
+      requestMock.mockRejectedValue(new HttpError(403, 'Resource not accessible'));
+      await expect(new GitHubClient('t').checkOrgAccess('comunica')).rejects.toThrow();
+      expect(requestMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('getDefaultBranchCommitDate', () => {
+    it('asks for one commit on the default branch', async() => {
+      requestMock.mockResolvedValue(response([
+        { commit: { author: { date: '2026-04-01T00:00:00Z' }, committer: { date: '2026-04-02T00:00:00Z' }}},
+      ]));
+      await expect(new GitHubClient('t').getDefaultBranchCommitDate(REPO))
+        .resolves.toBe('2026-04-02T00:00:00Z');
+      expect(requestMock).toHaveBeenCalledWith(
+        'GET /repos/{owner}/{repo}/commits',
+        expect.objectContaining({ owner: 'rubensworks', repo: 'jbr.js', sha: 'master', per_page: 1 }),
+      );
+    });
+
+    it('falls back to the author date when there is no committer', async() => {
+      requestMock.mockResolvedValue(response([
+        { commit: { author: { date: '2026-04-01T00:00:00Z' }, committer: null }},
+      ]));
+      await expect(new GitHubClient('t').getDefaultBranchCommitDate(REPO))
+        .resolves.toBe('2026-04-01T00:00:00Z');
+    });
+
+    it('is undefined for a commit without any date', async() => {
+      requestMock.mockResolvedValue(response([{ commit: { author: null, committer: null }}]));
+      await expect(new GitHubClient('t').getDefaultBranchCommitDate(REPO)).resolves.toBeUndefined();
+    });
+
+    it('is undefined for an empty repository', async() => {
+      requestMock.mockResolvedValue(response([]));
+      await expect(new GitHubClient('t').getDefaultBranchCommitDate(REPO)).resolves.toBeUndefined();
     });
   });
 

@@ -1,6 +1,7 @@
-import type { ISettings, Theme, TokenLocation } from './types';
+import type { IOwnerToken, ISettings, Theme, TokenLocation } from './types';
 
 const TOKEN_KEY = 'gh-actions-overview:token';
+const OWNER_TOKENS_KEY = 'gh-actions-overview:owner-tokens';
 const SETTINGS_KEY = 'gh-actions-overview:settings';
 
 export const DEFAULT_SETTINGS: ISettings = {
@@ -84,6 +85,53 @@ export function saveToken(token: string, remember: boolean): void {
 export function clearToken(): void {
   safeRemove(localStorage, TOKEN_KEY);
   safeRemove(sessionStorage, TOKEN_KEY);
+}
+
+function parseOwnerTokens(raw: string | undefined): IOwnerToken[] {
+  if (raw === undefined) {
+    return [];
+  }
+  let parsed: unknown;
+  try {
+    parsed = <unknown> JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+  return parsed.filter((entry): entry is IOwnerToken =>
+    typeof entry === 'object' && entry !== null &&
+    typeof (<IOwnerToken> entry).owner === 'string' && (<IOwnerToken> entry).owner.length > 0 &&
+    typeof (<IOwnerToken> entry).token === 'string' && (<IOwnerToken> entry).token.length > 0);
+}
+
+/**
+ * Reads the per-owner tokens, session storage first, exactly like the main token.
+ */
+export function loadOwnerTokens(): IOwnerToken[] {
+  const fromSession = parseOwnerTokens(safeRead(sessionStorage, OWNER_TOKENS_KEY));
+  return fromSession.length > 0 ? fromSession : parseOwnerTokens(safeRead(localStorage, OWNER_TOKENS_KEY));
+}
+
+/**
+ * Persists the per-owner tokens beside the main one.
+ * @param tokens The tokens to store. An empty list clears them.
+ * @param remember Whether to keep them across browser restarts.
+ */
+export function saveOwnerTokens(tokens: IOwnerToken[], remember: boolean): void {
+  clearOwnerTokens();
+  if (tokens.length > 0) {
+    safeWrite(remember ? localStorage : sessionStorage, OWNER_TOKENS_KEY, JSON.stringify(tokens));
+  }
+}
+
+/**
+ * Removes every per-owner token from both storages.
+ */
+export function clearOwnerTokens(): void {
+  safeRemove(localStorage, OWNER_TOKENS_KEY);
+  safeRemove(sessionStorage, OWNER_TOKENS_KEY);
 }
 
 function toStringArray(value: unknown): string[] | undefined {

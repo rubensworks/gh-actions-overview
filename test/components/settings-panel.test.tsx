@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsPanel } from '../../src/components/settings-panel';
 import { notificationPermission, requestNotificationPermission } from '../../src/lib/notifications';
-import type { ISettings, TokenLocation } from '../../src/lib/types';
+import type { IOwnerToken, ISettings, TokenLocation } from '../../src/lib/types';
 import { settings } from '../fixtures';
 
 vi.mock('../../src/lib/notifications', () => ({
@@ -25,25 +25,34 @@ afterEach(cleanup);
 interface IPanelOptions {
   tokenLocation?: TokenLocation;
   onTokenSave?: (token: string, remember: boolean) => Promise<void>;
+  ownerTokens?: IOwnerToken[];
+  onOwnerTokenSave?: (owner: string, token: string) => Promise<void>;
 }
 
 function renderPanel(overrides: Partial<ISettings> = {}, options: IPanelOptions = {}): {
   onChange: ReturnType<typeof vi.fn>;
   onTokenSave: ReturnType<typeof vi.fn>;
   onTokenRemove: ReturnType<typeof vi.fn>;
+  onOwnerTokenSave: ReturnType<typeof vi.fn>;
+  onOwnerTokenRemove: ReturnType<typeof vi.fn>;
   rerender: (next: Partial<ISettings>) => void;
 } {
   const onChange = vi.fn();
   const onTokenSave = vi.fn(options.onTokenSave ?? (async(): Promise<void> => undefined));
   const onTokenRemove = vi.fn();
+  const onOwnerTokenSave = vi.fn(options.onOwnerTokenSave ?? (async(): Promise<void> => undefined));
+  const onOwnerTokenRemove = vi.fn();
   const location = options.tokenLocation ?? 'local';
   const panel = (next: Partial<ISettings>): React.ReactElement => (
     <SettingsPanel
       settings={settings({ ...overrides, ...next })}
       tokenLocation={location}
+      ownerTokens={options.ownerTokens ?? []}
       onChange={onChange}
       onTokenSave={onTokenSave}
       onTokenRemove={onTokenRemove}
+      onOwnerTokenSave={onOwnerTokenSave}
+      onOwnerTokenRemove={onOwnerTokenRemove}
     />
   );
   const { rerender } = render(panel({}));
@@ -51,6 +60,8 @@ function renderPanel(overrides: Partial<ISettings> = {}, options: IPanelOptions 
     onChange,
     onTokenSave,
     onTokenRemove,
+    onOwnerTokenSave,
+    onOwnerTokenRemove,
     rerender: (next: Partial<ISettings>): void => rerender(panel(next)),
   };
 }
@@ -85,7 +96,7 @@ describe('SettingsPanel', () => {
   describe('organisations', () => {
     it('keeps typing local until the field is left', () => {
       const { onChange } = renderPanel();
-      const field = screen.getByPlaceholderText('comunica');
+      const field = screen.getByLabelText('Extra organisations (one per line)');
       fireEvent.change(field, { target: { value: 'comunica' }});
       expect(onChange).not.toHaveBeenCalled();
       fireEvent.blur(field);
@@ -94,7 +105,7 @@ describe('SettingsPanel', () => {
 
     it('splits on whitespace and commas, dropping blanks', () => {
       const { onChange } = renderPanel();
-      const field = screen.getByPlaceholderText('comunica');
+      const field = screen.getByLabelText('Extra organisations (one per line)');
       fireEvent.change(field, { target: { value: ' comunica,\n rubensworks \n\n' }});
       fireEvent.blur(field);
       expect(onChange).toHaveBeenCalledWith(
@@ -105,7 +116,7 @@ describe('SettingsPanel', () => {
     it('picks up externally changed settings', () => {
       const { rerender } = renderPanel();
       rerender({ orgs: [ 'comunica' ]});
-      expect(screen.getByPlaceholderText('comunica')).toHaveProperty('value', 'comunica');
+      expect(screen.getByLabelText('Extra organisations (one per line)')).toHaveProperty('value', 'comunica');
     });
   });
 
@@ -296,5 +307,105 @@ describe('SettingsPanel', () => {
       renderPanel();
       expect(screen.getAllByRole('checkbox')[1]).toHaveProperty('disabled', false);
     });
+  });
+});
+
+describe('SettingsPanel organisation tokens', () => {
+  it('says why an organisation may need one of its own', () => {
+    renderPanel();
+    expect(screen.getByText(/reaches one resource owner/u)).toBeDefined();
+  });
+
+  it('lists the organisations that have one, never the tokens themselves', () => {
+    renderPanel({}, { ownerTokens: [{ owner: 'comunica', token: 'secret-value' }]});
+    expect(screen.getByText('comunica')).toBeDefined();
+    expect(document.body.textContent).not.toContain('secret-value');
+  });
+
+  it('shows no list when none are configured', () => {
+    renderPanel();
+    expect(document.querySelector('.settings__owner-list')).toBeNull();
+  });
+
+  it('adds one', async() => {
+    const { onOwnerTokenSave } = renderPanel();
+    fireEvent.change(screen.getByLabelText('Organisation login'), { target: { value: 'comunica' }});
+    fireEvent.change(screen.getByLabelText('Token for this organisation'), { target: { value: 'abc' }});
+    fireEvent.click(screen.getByText('Add organisation token'));
+    await waitFor(() => expect(onOwnerTokenSave).toHaveBeenCalledWith('comunica', 'abc'));
+  });
+
+  it('trims a leading @ from the organisation', async() => {
+    const { onOwnerTokenSave } = renderPanel();
+    fireEvent.change(screen.getByLabelText('Organisation login'), { target: { value: ' @comunica ' }});
+    fireEvent.change(screen.getByLabelText('Token for this organisation'), { target: { value: ' abc ' }});
+    fireEvent.click(screen.getByText('Add organisation token'));
+    await waitFor(() => expect(onOwnerTokenSave).toHaveBeenCalledWith('comunica', 'abc'));
+  });
+
+  it('clears both fields once it is accepted', async() => {
+    renderPanel();
+    fireEvent.change(screen.getByLabelText('Organisation login'), { target: { value: 'comunica' }});
+    fireEvent.change(screen.getByLabelText('Token for this organisation'), { target: { value: 'abc' }});
+    fireEvent.click(screen.getByText('Add organisation token'));
+    await waitFor(() =>
+      expect((screen.getByLabelText('Organisation login') as HTMLInputElement).value).toBe(''));
+    expect((screen.getByLabelText('Token for this organisation') as HTMLInputElement).value).toBe('');
+  });
+
+  it('refuses to submit without both fields', () => {
+    const { onOwnerTokenSave } = renderPanel();
+    fireEvent.change(screen.getByLabelText('Organisation login'), { target: { value: 'comunica' }});
+    fireEvent.click(screen.getByText('Add organisation token'));
+    expect(onOwnerTokenSave).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toContain('Both an organisation and a token');
+  });
+
+  it('reports a token the organisation refuses', async() => {
+    const { onOwnerTokenSave } = renderPanel({}, {
+      onOwnerTokenSave: async(): Promise<void> => {
+        throw new Error('Access forbidden — a fine-grained token only reaches the owner it was created for');
+      },
+    });
+    fireEvent.change(screen.getByLabelText('Organisation login'), { target: { value: 'comunica' }});
+    fireEvent.change(screen.getByLabelText('Token for this organisation'), { target: { value: 'nope' }});
+    fireEvent.click(screen.getByText('Add organisation token'));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Access forbidden'));
+    expect(onOwnerTokenSave).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a rejection that is not an Error', async() => {
+    renderPanel({}, {
+      onOwnerTokenSave: async(): Promise<void> => {
+        // eslint-disable-next-line no-throw-literal
+        throw 'plain string';
+      },
+    });
+    fireEvent.change(screen.getByLabelText('Organisation login'), { target: { value: 'comunica' }});
+    fireEvent.change(screen.getByLabelText('Token for this organisation'), { target: { value: 'x' }});
+    fireEvent.click(screen.getByText('Add organisation token'));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('plain string'));
+  });
+
+  it('says it is checking while the token is verified', async() => {
+    let release = (): void => {};
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    renderPanel({}, { onOwnerTokenSave: async(): Promise<void> => pending });
+    fireEvent.change(screen.getByLabelText('Organisation login'), { target: { value: 'comunica' }});
+    fireEvent.change(screen.getByLabelText('Token for this organisation'), { target: { value: 'x' }});
+    fireEvent.click(screen.getByText('Add organisation token'));
+    await waitFor(() => expect(screen.getByText('Checking…')).toBeDefined());
+    release();
+    await waitFor(() => expect(screen.getByText('Add organisation token')).toBeDefined());
+  });
+
+  it('removes one', () => {
+    const { onOwnerTokenRemove } = renderPanel({}, {
+      ownerTokens: [{ owner: 'comunica', token: 'abc' }],
+    });
+    fireEvent.click(screen.getByText('Remove'));
+    expect(onOwnerTokenRemove).toHaveBeenCalledWith('comunica');
   });
 });

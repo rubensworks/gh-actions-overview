@@ -5,7 +5,7 @@ import type { IFailureEvent } from '../../src/lib/dashboardStore';
 import { applyOverallStatus } from '../../src/lib/favicon';
 import type { GitHubClient } from '../../src/lib/githubClient';
 import { notifyFailure } from '../../src/lib/notifications';
-import type { IDashboardState, ISettings, IViewer, TokenLocation } from '../../src/lib/types';
+import type { IDashboardState, IOwnerToken, ISettings, IViewer, TokenLocation } from '../../src/lib/types';
 import { NOW, repoState, settings, workflowGroup, workflowRun } from '../fixtures';
 
 // A hand-driven stand-in for the polling store, so the shell can be tested without timers.
@@ -26,6 +26,7 @@ const { FakeStore } = vi.hoisted(() => {
     public static last: FakeStoreImpl | undefined;
     public readonly calls: string[] = [];
     public readonly appliedSettings: ISettings[] = [];
+    public readonly commitDatesWanted: boolean[] = [];
     public readonly onFailure: (event: IFailureEvent) => void;
     public readonly scope: { owner: string | undefined; anonymous: boolean };
     private state: IDashboardState = initial;
@@ -52,6 +53,10 @@ const { FakeStore } = vi.hoisted(() => {
       return (): void => {
         this.listeners.delete(listener);
       };
+    }
+
+    public setCommitDatesWanted(wanted: boolean): void {
+      this.commitDatesWanted.push(wanted);
     }
 
     public start(): void {
@@ -102,6 +107,7 @@ interface IRenderOptions {
   viewer?: IViewer | undefined;
   owner?: string | undefined;
   tokenLocation?: TokenLocation;
+  ownerTokens?: IOwnerToken[];
 }
 
 function renderDashboard(options: IRenderOptions = {}): {
@@ -109,12 +115,16 @@ function renderDashboard(options: IRenderOptions = {}): {
   onLeave: ReturnType<typeof vi.fn>;
   onTokenSave: ReturnType<typeof vi.fn>;
   onTokenRemove: ReturnType<typeof vi.fn>;
+  onOwnerTokenSave: ReturnType<typeof vi.fn>;
+  onOwnerTokenRemove: ReturnType<typeof vi.fn>;
   store: () => FakeStoreInstance;
 } {
   const onSettingsChange = vi.fn();
   const onLeave = vi.fn();
   const onTokenSave = vi.fn(async(): Promise<void> => undefined);
   const onTokenRemove = vi.fn();
+  const onOwnerTokenSave = vi.fn(async(): Promise<void> => undefined);
+  const onOwnerTokenRemove = vi.fn();
   render(
     <Dashboard
       client={{} as unknown as GitHubClient}
@@ -122,13 +132,24 @@ function renderDashboard(options: IRenderOptions = {}): {
       owner={options.owner}
       settings={settings(options.settings)}
       tokenLocation={options.tokenLocation ?? 'local'}
+      ownerTokens={options.ownerTokens ?? []}
       onSettingsChange={onSettingsChange}
       onTokenSave={onTokenSave}
       onTokenRemove={onTokenRemove}
+      onOwnerTokenSave={onOwnerTokenSave}
+      onOwnerTokenRemove={onOwnerTokenRemove}
       onLeave={onLeave}
     />,
   );
-  return { onSettingsChange, onLeave, onTokenSave, onTokenRemove, store: () => FakeStore.last! };
+  return {
+    onSettingsChange,
+    onLeave,
+    onTokenSave,
+    onTokenRemove,
+    onOwnerTokenSave,
+    onOwnerTokenRemove,
+    store: () => FakeStore.last!,
+  };
 }
 
 // The repository names shown in the rows, which is what the filters act on.
