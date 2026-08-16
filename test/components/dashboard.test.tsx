@@ -308,7 +308,7 @@ describe('Dashboard', () => {
     it('opens for the clicked repository and closes again', () => {
       const { store } = renderDashboard();
       load(store());
-      fireEvent.click(screen.getAllByTitle('Show the last runs of every workflow')[0]!);
+      fireEvent.click(screen.getAllByTitle(/show the last runs of every workflow/u)[0]!);
       expect(screen.getByRole('dialog')).toBeDefined();
       fireEvent.click(screen.getByLabelText('Close'));
       expect(screen.queryByRole('dialog')).toBeNull();

@@ -22,6 +22,9 @@ this app ever talks to is `api.github.com`, straight from your browser.
 - **The default branch is the status.** Each workflow reports its newest run on the repository's
   default branch, however long ago that was. A red feature branch never displaces a green `master`,
   and the failure count and the favicon follow the same rule.
+- **A status rule down the margin**, in the spirit of the Travis overview: every row carries a
+  green, red or yellow line on its left edge, its name in the same colour, and a tick, cross or
+  spinner in front of it. The state of a long list reads straight down the left-hand side.
 - **Sorting** by last push, last commit on the default branch, last workflow run, last
   default-branch run, failures first, stars, or name — part of the URL fragment like every other
   bit of view state.
@@ -173,6 +176,28 @@ In **Settings** you can:
   you to public mode when the fragment names an owner, or back to the setup screen otherwise;
 - add an **organisation token**, used for that organisation alongside your own token rather than
   instead of it — see [above](#organisations-need-their-own-token).
+
+## Reading the list at a glance
+
+Each row carries its verdict three times over — a coloured rule down its left edge, the repository
+name in the same colour, and an icon in front of the name:
+
+| | Rule and name | Icon | Means |
+|---|---|---|---|
+| 🟢 | green | tick | Everything on the default branch passed |
+| 🔴 | red | cross | Something on the default branch is failing |
+| 🟡 | yellow | spinner | Something on the default branch is queued or running, and nothing is failing |
+| ⚪ | grey | dot | The default branch has nothing to say — no run of its own, or only cancelled and skipped ones |
+
+![The status rule down the margin](docs/screenshots/status-accent.png)
+
+Red beats yellow, and yellow beats green, so a row is only green when everything on its trunk is.
+
+**The tab is the worst of the rows, and nothing else.** The row colour and the favicon come from the
+same function, so they cannot drift apart: if every row is green the favicon is green, one red row
+turns it red, and a dashboard where nothing is known stays grey rather than claiming success.
+Repositories that are only grey — the ones whose workflows have never run on the trunk — pull the
+tab in no direction at all.
 
 ## Which run is shown
 

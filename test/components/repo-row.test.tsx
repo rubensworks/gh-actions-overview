@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RepoRow } from '../../src/components/repo-row';
-import { NOW, repoRef, repoState, workflowGroup, workflowRun } from '../fixtures';
+import { NOW, offTrunkGroup, repoRef, repoState, workflowGroup, workflowRun } from '../fixtures';
 
 afterEach(cleanup);
 
@@ -33,8 +33,87 @@ describe('RepoRow', () => {
   it('opens the drawer when the name is clicked', () => {
     const onOpen = vi.fn();
     render(<RepoRow repo={repoState('a/b')} now={NOW} onOpen={onOpen} />);
-    fireEvent.click(screen.getByTitle('Show the last runs of every workflow'));
+    fireEvent.click(screen.getByTitle(/show the last runs of every workflow/u));
     expect(onOpen).toHaveBeenCalledWith('a/b');
+  });
+
+  // The row carries its verdict three times over: a rule down the left edge, the colour of the
+  // name, and an icon in front of it.
+  describe('the status accent', () => {
+    function row(...states: Parameters<typeof workflowRun>[0][]): HTMLElement {
+      const repo = repoState('a/b', {
+        workflows: states.map((state, index) =>
+          workflowGroup(`W${index}`, [ workflowRun(state) ], index + 1)),
+      });
+      const { container } = render(<RepoRow repo={repo} now={NOW} onOpen={noop} />);
+      return container.querySelector('.repo-row')!;
+    }
+
+    it('is green when every default-branch run succeeded', () => {
+      expect(row('success', 'success').className).toContain('repo-row--success');
+    });
+
+    it('is red as soon as one is failing', () => {
+      expect(row('success', 'failure').className).toContain('repo-row--failure');
+    });
+
+    it('is yellow while one is running, when nothing is failing', () => {
+      expect(row('success', 'running').className).toContain('repo-row--running');
+    });
+
+    it('is yellow for a queued run too', () => {
+      expect(row('queued').className).toContain('repo-row--running');
+    });
+
+    it('stays red when something is both failing and running', () => {
+      expect(row('failure', 'running').className).toContain('repo-row--failure');
+    });
+
+    it('is grey when the default branch has only been cancelled or skipped', () => {
+      expect(row('cancelled', 'skipped').className).toContain('repo-row--idle');
+    });
+
+    it('is grey for a repository whose workflows only ever ran off the trunk', () => {
+      const repo = repoState('a/b', {
+        workflows: [ offTrunkGroup('CI', [ workflowRun('failure', { branch: 'spike' }) ]) ],
+      });
+      const { container } = render(<RepoRow repo={repo} now={NOW} onOpen={noop} />);
+      expect(container.querySelector('.repo-row')!.className).toContain('repo-row--idle');
+    });
+
+    it('shows a tick in front of a green repository', () => {
+      render(<RepoRow repo={repoState('a/b')} now={NOW} onOpen={noop} />);
+      expect(screen.getAllByLabelText('Success').length).toBeGreaterThan(0);
+    });
+
+    it('shows a cross in front of a failing one', () => {
+      const repo = repoState('a/b', { workflows: [ workflowGroup('CI', [ workflowRun('failure') ]) ]});
+      const { container } = render(<RepoRow repo={repo} now={NOW} onOpen={noop} />);
+      expect(container.querySelector('.repo-row__name .status-icon--failure')).not.toBeNull();
+    });
+
+    it('shows a running icon in front of a building one', () => {
+      const repo = repoState('a/b', { workflows: [ workflowGroup('CI', [ workflowRun('running') ]) ]});
+      const { container } = render(<RepoRow repo={repo} now={NOW} onOpen={noop} />);
+      expect(container.querySelector('.repo-row__name .status-icon--running')).not.toBeNull();
+    });
+
+    it('shows a neutral icon when the trunk has not run', () => {
+      const repo = repoState('a/b', { workflows: []});
+      const { container } = render(<RepoRow repo={repo} now={NOW} onOpen={noop} />);
+      expect(container.querySelector('.repo-row__name .status-icon--unknown')).not.toBeNull();
+    });
+
+    it('says what the colour means in the tooltip', () => {
+      const repo = repoState('a/b', { workflows: [ workflowGroup('CI', [ workflowRun('failure') ]) ]});
+      render(<RepoRow repo={repo} now={NOW} onOpen={noop} />);
+      expect(screen.getByTitle(/The default branch is failing/u)).toBeDefined();
+    });
+
+    it('keeps the name in its own element, so only the text ellipsises', () => {
+      const { container } = render(<RepoRow repo={repoState('a/b')} now={NOW} onOpen={noop} />);
+      expect(container.querySelector('.repo-row__label .repo-row__repo')).not.toBeNull();
+    });
   });
 
   describe('badges', () => {
