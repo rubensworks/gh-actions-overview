@@ -131,6 +131,11 @@ npm run preview    # Serve the production build
 Both `npm run lint` and `npm run build` run on every push and pull request via
 [`ci.yml`](.github/workflows/ci.yml).
 
+> **Note:** the CI and deployment workflows currently sit in
+> [`docs/workflows/`](docs/workflows/) and still have to be moved into `.github/workflows/`. See
+> [`docs/workflows/README.md`](docs/workflows/README.md) for why, and for the one command that does
+> it.
+
 ### Layout
 
 ```
