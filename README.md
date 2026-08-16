@@ -31,6 +31,9 @@ this app ever talks to is `api.github.com`, straight from your browser.
   pinned tab is enough to keep an eye on things.
 - **Optional desktop notifications** when a workflow transitions into failure.
 - **Dark, light, or follow-the-system** theme.
+- **Works on a phone.** Below 720px each run folds onto two lines, the filter bar becomes the only
+  sticky element, form controls are 16px so iOS Safari does not zoom on focus, and the status bar
+  clears the iPhone home indicator.
 
 ## Setting up a token
 
@@ -107,6 +110,14 @@ In **Settings** you can:
 Settings are persisted in `localStorage`; filters are persisted in the URL.
 
 ![Settings](docs/screenshots/settings.png)
+
+## On a phone
+
+The same dashboard at iPhone width. Each run becomes two lines — status, workflow and age on the
+first, branch and commit subject on the second — and the header stops being sticky so the filter bar
+can take that job.
+
+<img src="docs/screenshots/mobile-dashboard.png" alt="The dashboard on an iPhone" width="320" />
 
 ## Rate limits
 

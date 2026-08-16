@@ -62,6 +62,11 @@
   box-sizing: border-box;
 }
 
+/* Stop iOS from rescaling text when the phone is rotated to landscape. */
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
 html,
 body,
 #root {
@@ -265,7 +270,8 @@ code {
   display: flex;
   flex-direction: column;
   min-height: 100%;
-  padding-bottom: 30px;
+  /* Clears the fixed footer, plus the iPhone home indicator when there is one. */
+  padding-bottom: calc(30px + env(safe-area-inset-bottom, 0px));
 }
 
 .header {
@@ -806,8 +812,8 @@ a.run:hover .run__open {
   display: flex;
   align-items: center;
   gap: 12px;
-  height: 26px;
-  padding: 0 12px;
+  height: calc(26px + env(safe-area-inset-bottom, 0px));
+  padding: 0 12px env(safe-area-inset-bottom, 0px);
   background: var(--bg-elevated);
   border-top: 1px solid var(--border);
   font-size: 11px;
@@ -877,18 +883,120 @@ a.run:hover .run__open {
 .footer__quota--low .footer__quota-fill { background: var(--failure); }
 .footer__quota--low { color: var(--failure); }
 
+/* ----------------------------------------------------------------- phones */
+
 @media (width <= 720px) {
-  .repo-row {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 2px;
+  /* Two stacked sticky bars do not fit on a phone, so only the filters stay put. */
+  .header {
+    position: static;
+    flex-wrap: wrap;
+    row-gap: 8px;
+    padding: 10px 12px;
   }
 
-  .run {
-    grid-template-columns: 14px minmax(70px, 1fr) minmax(0, 1fr) 54px;
+  .header__actions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .header__viewer {
+    margin-right: auto;
+  }
+
+  .filters {
+    top: 0;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+  }
+
+  .filters__search {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+
+  /* Anything below 16px makes iOS Safari zoom the page in on focus. */
+  .filters__search,
+  .filters__select,
+  .settings__select,
+  .settings__number,
+  .settings__textarea,
+  .setup__input {
+    font-size: 16px;
+  }
+
+  /* Comfortable touch targets. */
+  .button,
+  .chip {
+    min-height: 32px;
+    padding-inline: 12px;
+  }
+
+  .repo-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+    padding: 8px 12px;
+  }
+
+  .repo-row__name {
+    padding: 8px 0;
+    font-size: 14px;
+  }
+
+  /*
+   * A run needs two lines at this width:
+   *   [icon] workflow            time
+   *          branch    commit message
+   */
+  a.run {
+    grid-template-columns: 16px auto minmax(0, 1fr);
+    align-items: baseline;
+    row-gap: 2px;
+    min-height: 40px;
+    padding: 5px 4px;
+  }
+
+  a.run .status-icon {
+    grid-area: 1 / 1 / 2 / 2;
+    align-self: center;
+  }
+
+  a.run .run__workflow {
+    grid-area: 1 / 2 / 2 / 3;
+    /* Bounded, so a long workflow name cannot push the commit message off to the right. */
+    max-width: 46vw;
+  }
+
+  a.run .run__time {
+    grid-area: 1 / 3 / 2 / 4;
+  }
+
+  a.run .run__branch {
+    grid-area: 2 / 2 / 3 / 3;
+    max-width: 40vw;
+  }
+
+  a.run .run__commit {
+    grid-area: 2 / 3 / 3 / 4;
   }
 
   .run__duration,
   .run__open {
+    display: none;
+  }
+
+  .drawer__body {
+    padding-inline: 8px;
+  }
+
+  /* The footer keeps the polling state and the quota; the rest is desktop luxury. */
+  .footer {
+    gap: 10px;
+    padding-inline: 10px;
+  }
+
+  .footer__item--muted,
+  .footer__quota-bar {
     display: none;
   }
 }
