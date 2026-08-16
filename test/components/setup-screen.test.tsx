@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SetupScreen } from '../../src/components/setup-screen';
+import { SOURCE_URL } from '../../src/lib/links';
 
 afterEach(cleanup);
 
@@ -36,6 +37,23 @@ describe('SetupScreen', () => {
     renderSetup();
     expect(screen.getByText(/Metadata: read-only/u)).toBeDefined();
     expect(screen.getByText(/Actions: read-only/u)).toBeDefined();
+  });
+
+  describe('source link', () => {
+    it('invites the reader to check the source from the lead paragraph', () => {
+      renderSetup();
+      const link = screen.getByText('read the source');
+      expect(link.getAttribute('href')).toBe(SOURCE_URL);
+      expect(link.getAttribute('target')).toBe('_blank');
+      expect(link.getAttribute('rel')).toBe('noreferrer noopener');
+    });
+
+    it('names the repository in the page footer', () => {
+      renderSetup();
+      const link = screen.getByText('rubensworks/gh-actions-overview');
+      expect(link.getAttribute('href')).toBe(SOURCE_URL);
+      expect(link.closest('.setup__footer')).not.toBeNull();
+    });
   });
 
   it('keeps the token field masked', () => {

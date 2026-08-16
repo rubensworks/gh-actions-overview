@@ -1,3 +1,4 @@
+import { SOURCE_URL } from '../lib/links';
 import { formatRelative, formatUntil } from '../lib/time';
 import type { IDashboardState } from '../lib/types';
 
@@ -66,6 +67,16 @@ export function StatusFooter({ state, hiddenCount, now }: IStatusFooterProps) {
               {formatUntil(rateLimit.reset, now)}
             </span>
           )}
+
+      <a
+        className="footer__source"
+        href={SOURCE_URL}
+        target="_blank"
+        rel="noreferrer noopener"
+        title="Read the source of this dashboard on GitHub"
+      >
+        source
+      </a>
     </footer>
   );
 }
