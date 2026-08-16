@@ -298,6 +298,29 @@ describe('GitHubClient', () => {
     expect(new GitHubClient('t').rateLimit).toBeUndefined();
   });
 
+  it('omits the auth option entirely when there is no token', () => {
+    const client = new GitHubClient(undefined);
+    expect(constructorMock).toHaveBeenCalledWith(
+      expect.objectContaining({ userAgent: 'gh-actions-overview' }),
+    );
+    expect(constructorMock.mock.calls[0]?.[0]).not.toHaveProperty('auth');
+    expect(client.anonymous).toBe(true);
+  });
+
+  it('is not anonymous with a token', () => {
+    expect(new GitHubClient('t').anonymous).toBe(false);
+  });
+
+  it('lists the public repositories of any owner', async() => {
+    requestMock.mockResolvedValue(response([ apiRepo('comunica', '2026-05-01T00:00:00Z') ]));
+    const repos = await new GitHubClient(undefined).listOwnerRepos('comunica', 0);
+    expect(requestMock).toHaveBeenCalledWith(
+      'GET /users/{username}/repos',
+      expect.objectContaining({ username: 'comunica', sort: 'pushed', per_page: 100 }),
+    );
+    expect(repos[0]?.source).toBe('owner');
+  });
+
   describe('getViewer', () => {
     it('maps the authenticated user', async() => {
       requestMock.mockResolvedValue(

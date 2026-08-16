@@ -22,16 +22,37 @@ const WORKFLOW_LIST_REFRESH_MS = 900_000;
 const NO_ACTIONS_REFRESH_MS = 1_800_000;
 const ERROR_REFRESH_MS = 300_000;
 const CONCURRENCY = 6;
-// Below this many remaining requests, polling slows down by the factor below.
-const LOW_QUOTA = 300;
+// Polling slows down by this factor once the quota gets low.
 const LOW_QUOTA_FACTOR = 5;
-// Below this, polling stops entirely until the quota resets.
-const CRITICAL_QUOTA = 30;
+// Anonymous callers get 60 requests an hour for the whole IP, so the initial load has to be small
+// enough to leave room for polling. Conditional requests answered with 304 are free after that.
+const ANONYMOUS_REPO_LIMIT = 15;
+
+// Thresholds are a fraction of the quota, because an anonymous budget is 60 and a token's is 5000.
+function lowQuota(limit: number): number {
+  return Math.max(8, Math.round(limit * 0.06));
+}
+
+function criticalQuota(limit: number): number {
+  return Math.max(2, Math.round(limit * 0.006));
+}
 
 export interface IFailureEvent {
   repoFullName: string;
   workflowName: string;
   url: string;
+}
+
+export interface IDashboardScope {
+  /**
+   * A user or organisation login to scope the dashboard to, or undefined to use the
+   * repositories of the authenticated user.
+   */
+  owner: string | undefined;
+  /**
+   * Whether the client has no token, which caps how many repositories are worth loading.
+   */
+  anonymous: boolean;
 }
 
 export const INITIAL_STATE: IDashboardState = {
@@ -74,6 +95,7 @@ export class DashboardStore {
   private readonly workflowDefinitions = new Map<string, IWorkflowDefinition[]>();
   private readonly lastRunStates = new Map<string, RunState>();
   private readonly onFailure: (event: IFailureEvent) => void;
+  private readonly scope: IDashboardScope;
   private state: IDashboardState = INITIAL_STATE;
   private settings: ISettings;
   private timer: number | undefined;
@@ -81,10 +103,16 @@ export class DashboardStore {
   private repoListInFlight = false;
   private readonly onVisibilityChange: () => void;
 
-  public constructor(client: GitHubClient, settings: ISettings, onFailure: (event: IFailureEvent) => void) {
+  public constructor(
+    client: GitHubClient,
+    settings: ISettings,
+    onFailure: (event: IFailureEvent) => void,
+    scope?: IDashboardScope,
+  ) {
     this.client = client;
     this.settings = settings;
     this.onFailure = onFailure;
+    this.scope = scope ?? { owner: undefined, anonymous: false };
     this.onVisibilityChange = (): void => {
       this.patch({ paused: document.hidden });
       if (!document.hidden) {
@@ -198,6 +226,14 @@ export class DashboardStore {
     const collected = new Map<string, IRepoRef>();
     const problems: string[] = [];
 
+    // Scoped to one owner, the public listing is the only call needed, and it is the only one
+    // that works without a token.
+    if (this.scope.owner !== undefined) {
+      await this.collectOwnerRepos(this.scope.owner, cutoff, collected, problems);
+      this.finishRepoList(collected, new Set(), problems, true);
+      return;
+    }
+
     try {
       for (const repo of await this.client.listUserRepos(cutoff)) {
         collected.set(repo.key, repo);
@@ -236,7 +272,33 @@ export class DashboardStore {
       }
     }
 
-    const visible = [ ...collected.values() ].filter((repo) => {
+    this.finishRepoList(collected, manualKeys, problems, false);
+  }
+
+  private async collectOwnerRepos(
+    owner: string,
+    cutoff: number,
+    collected: Map<string, IRepoRef>,
+    problems: string[],
+  ): Promise<void> {
+    try {
+      for (const repo of await this.client.listOwnerRepos(owner, cutoff)) {
+        collected.set(repo.key, repo);
+      }
+    } catch (error: unknown) {
+      this.handleGlobalError(error);
+      problems.push(`${owner}: ${describeError(error)}`);
+    }
+  }
+
+  private finishRepoList(
+    collected: Map<string, IRepoRef>,
+    manualKeys: Set<string>,
+    problems: string[],
+    scoped: boolean,
+  ): void {
+    const cutoff = Date.now() - (this.settings.windowDays * DAY_MS);
+    let visible = [ ...collected.values() ].filter((repo) => {
       if (manualKeys.has(repo.key)) {
         return true;
       }
@@ -245,6 +307,15 @@ export class DashboardStore {
       }
       return Date.parse(repo.pushedAt) >= cutoff;
     });
+
+    // Without a token the whole IP shares 60 requests an hour, so only the liveliest fit.
+    if (scoped && this.scope.anonymous && visible.length > ANONYMOUS_REPO_LIMIT) {
+      visible = [ ...visible ]
+        .sort((left, right) => Date.parse(right.pushedAt) - Date.parse(left.pushedAt))
+        .slice(0, ANONYMOUS_REPO_LIMIT);
+      problems.push(`Showing the ${ANONYMOUS_REPO_LIMIT} most recently pushed repositories; ` +
+        'sign in with a token to see them all');
+    }
 
     this.repoListFetchedAt = Date.now();
     this.repoListInFlight = false;
@@ -384,7 +455,7 @@ export class DashboardStore {
 
   private intervalFor(workflows: IWorkflowGroup[]): number {
     const rateLimit = this.client.rateLimit;
-    if (rateLimit !== undefined && rateLimit.remaining <= CRITICAL_QUOTA) {
+    if (rateLimit !== undefined && rateLimit.remaining <= criticalQuota(rateLimit.limit)) {
       this.patch({
         backoffUntil: rateLimit.reset * 1000,
         backoffReason: 'Almost out of API quota, waiting for the reset',
@@ -398,7 +469,7 @@ export class DashboardStore {
     const base = busy ?
       ACTIVE_REFRESH_MS :
       IDLE_MIN_MS + Math.floor(Math.random() * (IDLE_MAX_MS - IDLE_MIN_MS));
-    const scarce = rateLimit !== undefined && rateLimit.remaining < LOW_QUOTA;
+    const scarce = rateLimit !== undefined && rateLimit.remaining < lowQuota(rateLimit.limit);
     return scarce ? base * LOW_QUOTA_FACTOR : base;
   }
 

@@ -217,14 +217,24 @@ function toWorkflowRun(run: IApiRun): IWorkflowRun {
 export class GitHubClient {
   private readonly octokit: Octokit;
   private readonly cache = new Map<string, ICacheEntry>();
+  private readonly isAnonymous: boolean;
   private rateLimitValue: IRateLimit | undefined;
 
-  public constructor(token: string) {
-    this.octokit = new Octokit({
-      auth: token,
-      userAgent: 'gh-actions-overview',
-      request: { retries: 0 },
-    });
+  /**
+   * @param token A personal access token, or undefined to talk to the API anonymously.
+   *   Anonymous requests only see public data and share a 60 requests per hour budget per IP.
+   */
+  public constructor(token: string | undefined) {
+    const options = { userAgent: 'gh-actions-overview', request: { retries: 0 }};
+    this.isAnonymous = token === undefined;
+    this.octokit = token === undefined ? new Octokit(options) : new Octokit({ ...options, auth: token });
+  }
+
+  /**
+   * Whether this client talks to the API without a token.
+   */
+  public get anonymous(): boolean {
+    return this.isAnonymous;
   }
 
   public get rateLimit(): IRateLimit | undefined {
@@ -249,6 +259,18 @@ export class GitHubClient {
    */
   public async listUserRepos(cutoff: number): Promise<IRepoRef[]> {
     return this.listRepoPages('GET /user/repos', {}, 'user', cutoff);
+  }
+
+  /**
+   * Lists the public repositories of any user or organisation, most recently pushed first.
+   *
+   * This is the only listing that works without a token, which is what the read-only public mode
+   * is built on. It reports public repositories for organisation logins too.
+   * @param login A user or organisation login.
+   * @param cutoff Unix timestamp in milliseconds; repositories pushed before this are irrelevant.
+   */
+  public async listOwnerRepos(login: string, cutoff: number): Promise<IRepoRef[]> {
+    return this.listRepoPages('GET /users/{username}/repos', { username: login }, 'owner', cutoff);
   }
 
   /**

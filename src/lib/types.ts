@@ -14,7 +14,7 @@ export type RunState =
 /**
  * How a repository ended up in the dashboard.
  */
-export type RepoSource = 'manual' | 'org' | 'user';
+export type RepoSource = 'manual' | 'org' | 'owner' | 'user';
 
 /**
  * The loading state of the Actions data of a single repository.

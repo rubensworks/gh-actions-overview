@@ -1,5 +1,5 @@
 import { type Mock, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { IFailureEvent } from '../src/lib/dashboardStore';
+import type { IDashboardScope, IFailureEvent } from '../src/lib/dashboardStore';
 import { DashboardStore, INITIAL_STATE } from '../src/lib/dashboardStore';
 import type { GitHubClient, IWorkflowDefinition } from '../src/lib/githubClient';
 import type { IRateLimit, IRepoRef, IRepoState, ISettings, IWorkflowGroup } from '../src/lib/types';
@@ -18,6 +18,7 @@ interface IFakeClient {
   listUserRepos: Mock<(cutoff: number) => Promise<IRepoRef[]>>;
   listOrgRepos: Mock<(org: string, cutoff: number) => Promise<IRepoRef[]>>;
   getRepo: Mock<(owner: string, name: string) => Promise<IRepoRef>>;
+  listOwnerRepos: Mock<(login: string, cutoff: number) => Promise<IRepoRef[]>>;
   listWorkflows: Mock<(repo: IRepoRef) => Promise<IWorkflowDefinition[]>>;
   listRuns: Mock<(repo: IRepoRef, workflows: IWorkflowDefinition[]) => Promise<IWorkflowGroup[]>>;
 }
@@ -39,6 +40,7 @@ function makeClient(): IFakeClient {
     listUserRepos: vi.fn(async(): Promise<IRepoRef[]> => [ repoRef('rubensworks/jbr.js') ]),
     listOrgRepos: vi.fn(async(): Promise<IRepoRef[]> => []),
     getRepo: vi.fn(async(): Promise<IRepoRef> => repoRef('rubensworks/pinned', { source: 'manual' })),
+    listOwnerRepos: vi.fn(async(): Promise<IRepoRef[]> => [ repoRef('comunica/comunica', { source: 'owner' }) ]),
     listWorkflows: vi.fn(async(): Promise<IWorkflowDefinition[]> => [ CI ]),
     listRuns: vi.fn(async(): Promise<IWorkflowGroup[]> =>
       [ workflowGroup('CI', [ workflowRun('success') ]) ]),
@@ -51,12 +53,17 @@ interface IHarness {
   failures: IFailureEvent[];
 }
 
-function harness(overrides: Partial<ISettings> = {}, client = makeClient()): IHarness {
+function harness(
+  overrides: Partial<ISettings> = {},
+  client = makeClient(),
+  scope?: IDashboardScope,
+): IHarness {
   const failures: IFailureEvent[] = [];
   const store = new DashboardStore(
     <GitHubClient><unknown> client,
     settings(overrides),
     event => failures.push(event),
+    scope,
   );
   return { store, client, failures };
 }
@@ -263,6 +270,110 @@ describe('repository list', () => {
     store.refreshNow();
     await vi.advanceTimersByTimeAsync(2100);
     expect(repoByKey(store, 'rubensworks/jbr.js')?.workflows).toEqual(before?.workflows);
+    store.stop();
+  });
+});
+
+describe('owner-scoped mode', () => {
+  it('lists the repositories of that owner instead of the user', async() => {
+    const { store, client } = harness({}, makeClient(), { owner: 'comunica', anonymous: true });
+    await boot(store);
+    expect(client.listOwnerRepos).toHaveBeenCalledWith('comunica', NOW - (30 * 86_400_000));
+    expect(client.listUserRepos).not.toHaveBeenCalled();
+    expect(repoByKey(store, 'comunica/comunica')).toBeDefined();
+    store.stop();
+  });
+
+  it('ignores configured organisations and pinned repositories', async() => {
+    const client = makeClient();
+    const { store } = harness(
+      { orgs: [ 'other' ], extraRepos: [ 'a/b' ]},
+      client,
+      { owner: 'comunica', anonymous: true },
+    );
+    await boot(store);
+    expect(client.listOrgRepos).not.toHaveBeenCalled();
+    expect(client.getRepo).not.toHaveBeenCalled();
+    store.stop();
+  });
+
+  it('reports a failure to list the owner', async() => {
+    const client = makeClient();
+    client.listOwnerRepos.mockRejectedValue(new HttpError(404, 'Not Found'));
+    const { store } = harness({}, client, { owner: 'ghost', anonymous: true });
+    await boot(store);
+    expect(store.getSnapshot().repoListError).toContain('ghost:');
+    store.stop();
+  });
+
+  it('caps an anonymous session at the fifteen liveliest repositories', async() => {
+    const client = makeClient();
+    client.listOwnerRepos.mockResolvedValue(
+      [ ...Array.from({ length: 40 }).keys() ].map(index => repoRef(`comunica/repo-${index}`, {
+        source: 'owner',
+        pushedAt: new Date(NOW - (index * 60_000)).toISOString(),
+      })),
+    );
+    const { store } = harness({}, client, { owner: 'comunica', anonymous: true });
+    await boot(store);
+    expect(store.getSnapshot().repos).toHaveLength(15);
+    expect(store.getSnapshot().repos[0]?.repo.name).toBe('repo-0');
+    expect(store.getSnapshot().repoListError).toContain('15 most recently pushed');
+    store.stop();
+  });
+
+  it('does not cap a token-backed session scoped to an owner', async() => {
+    const client = makeClient();
+    client.listOwnerRepos.mockResolvedValue(
+      [ ...Array.from({ length: 40 }).keys() ].map(index => repoRef(`comunica/repo-${index}`, {
+        source: 'owner',
+      })),
+    );
+    const { store } = harness({}, client, { owner: 'comunica', anonymous: false });
+    await boot(store);
+    expect(store.getSnapshot().repos).toHaveLength(40);
+    expect(store.getSnapshot().repoListError).toBeUndefined();
+    store.stop();
+  });
+
+  it('still honours the push window', async() => {
+    const client = makeClient();
+    client.listOwnerRepos.mockResolvedValue([
+      repoRef('comunica/fresh', { source: 'owner' }),
+      repoRef('comunica/stale', { source: 'owner', pushedAt: '2020-01-01T00:00:00Z' }),
+    ]);
+    const { store } = harness({}, client, { owner: 'comunica', anonymous: true });
+    await boot(store);
+    expect(store.getSnapshot().repos.map(repo => repo.repo.name)).toEqual([ 'fresh' ]);
+    store.stop();
+  });
+});
+
+describe('quota thresholds', () => {
+  it('scales the slowdown threshold to an anonymous budget', async() => {
+    const client = makeClient();
+    client.rateLimit = { limit: 60, remaining: 7, reset: RESET };
+    const { store } = harness({}, client, { owner: 'comunica', anonymous: true });
+    await boot(store);
+    expect(repoByKey(store, 'comunica/comunica')?.nextRefresh).toBe(Date.now() + (IDLE_MIN_MS * 5));
+    store.stop();
+  });
+
+  it('keeps polling at full speed while an anonymous budget is healthy', async() => {
+    const client = makeClient();
+    client.rateLimit = { limit: 60, remaining: 40, reset: RESET };
+    const { store } = harness({}, client, { owner: 'comunica', anonymous: true });
+    await boot(store);
+    expect(repoByKey(store, 'comunica/comunica')?.nextRefresh).toBe(Date.now() + IDLE_MIN_MS);
+    store.stop();
+  });
+
+  it('stops an anonymous session once only a couple of requests are left', async() => {
+    const client = makeClient();
+    client.rateLimit = { limit: 60, remaining: 1, reset: RESET };
+    const { store } = harness({}, client, { owner: 'comunica', anonymous: true });
+    await boot(store);
+    expect(store.getSnapshot().backoffUntil).toBe(RESET * 1000);
     store.stop();
   });
 });

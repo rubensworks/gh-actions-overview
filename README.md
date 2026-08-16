@@ -7,7 +7,8 @@
 A dashboard for all your GitHub Actions, in the spirit of the old Travis CI overview: one dense row
 per repository, the latest run of every workflow, and red where it hurts.
 
-**[→ Open the dashboard](https://rubensworks.github.io/gh-actions-overview/)**
+**[→ Open the dashboard](https://rubensworks.github.io/gh-actions-overview/)** ·
+**[→ Try it without a token](https://rubensworks.github.io/gh-actions-overview/#owner=comunica)**
 
 ![The dashboard in dark mode](docs/screenshots/dashboard-dark.png)
 
@@ -25,7 +26,10 @@ this app ever talks to is `api.github.com`, straight from your browser.
   with `304 Not Modified`, which does not count against your REST rate limit. The remaining quota
   is always visible in the footer.
 - **Filters** for failures, running workflows, owner, and free-text search across repository,
-  workflow, branch and commit message. The filter state lives in the URL, so views are bookmarkable.
+  workflow, branch and commit message. The whole view lives in the URL fragment, so views are
+  bookmarkable and shareable — and being a fragment, it is never sent to any server.
+- **A token-free public mode.** Point it at any user or organisation with
+  `#owner=<login>` and it shows their public Actions status with no sign-in at all.
 - **Repository drawer** with the last 10 runs of every workflow.
 - **Tab status.** The favicon and page title turn red (and count) when anything is failing, so a
   pinned tab is enough to keep an eye on things.
@@ -34,6 +38,28 @@ this app ever talks to is `api.github.com`, straight from your browser.
 - **Works on a phone.** Below 720px each run folds onto two lines, the filter bar becomes the only
   sticky element, form controls are 16px so iOS Safari does not zoom on focus, and the status bar
   clears the iPhone home indicator.
+
+## Two ways to use it
+
+**With a token** you see everything you have access to, including private repositories, on a budget
+of 5000 API requests an hour.
+
+**Without a token** you see the public Actions status of any one user or organisation. Add
+`#owner=<login>` to the URL, or type a login on the setup screen. Nothing is stored, nothing is
+sent anywhere, and the link is shareable:
+
+```
+https://rubensworks.github.io/gh-actions-overview/#owner=comunica
+https://rubensworks.github.io/gh-actions-overview/#owner=comunica&failures=1
+```
+
+GitHub allows **60 anonymous requests an hour per IP address**, which is the whole budget for
+public mode. To stay inside it the dashboard shows the 15 most recently pushed repositories of that
+owner and slows its polling down as the budget drains. Conditional requests keep the steady state
+nearly free, but the first load of a busy owner can still use a good part of the hour. If you hold
+a token, a `#owner=` link uses it automatically, and neither limit applies.
+
+![Public mode](docs/screenshots/public-mode.png)
 
 ## Setting up a token
 
@@ -107,7 +133,9 @@ In **Settings** you can:
 - include archived repositories;
 - switch the theme and enable failure notifications.
 
-Settings are persisted in `localStorage`; filters are persisted in the URL.
+Settings are persisted in `localStorage`. The view — the owner being browsed and every filter —
+is persisted in the URL fragment (`#owner=comunica&failures=1`), which browsers never send to a
+server.
 
 ![Settings](docs/screenshots/settings.png)
 
@@ -169,7 +197,7 @@ src/
     dashboardStore.ts      Polling scheduler and state, consumed via useSyncExternalStore
     selectors.ts           Filtering and aggregation
     storage.ts             Token and settings persistence
-    urlState.ts            Filter state in the query string
+    urlState.ts            Owner and filter state in the URL fragment
     favicon.ts             Tab title and favicon reflecting overall status
 ```
 
