@@ -34,7 +34,7 @@ export function RepoRow({ repo, now, onOpen }: IRepoRowProps) {
 
       <div className="repo-row__workflows">
         {repo.load === 'pending' || (repo.load === 'loading' && repo.workflows.length === 0) ?
-          <div className="run run--empty"><span className="skeleton" /></div> :
+          <div className="run run--loading"><span className="skeleton" /></div> :
           null}
 
         {repo.load === 'error' ?

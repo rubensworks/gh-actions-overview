@@ -26,20 +26,27 @@ export interface IRunLineProps {
   workflowName: string;
   now: number;
   showRunNumber?: boolean;
+  /**
+   * Whether this run stands in for a default branch that has not run this workflow. Such a run is
+   * dimmed, and counts towards nothing.
+   */
+  offTrunk?: boolean;
 }
 
 /**
  * A single line describing one workflow run.
  */
-export function RunLine({ run, workflowName, now, showRunNumber = false }: IRunLineProps) {
+export function RunLine(props: IRunLineProps) {
+  const { run, workflowName, now, showRunNumber = false, offTrunk = false } = props;
   const duration = runDuration(run.startedAt, run.updatedAt, isActive(run.state), now);
+  const title = `${workflowName} #${run.runNumber} — ${run.event} — ${formatAbsolute(run.createdAt)}`;
   return (
     <a
-      className={`run run--${run.state}`}
+      className={`run run--${run.state}${offTrunk ? ' run--off-trunk' : ''}`}
       href={run.htmlUrl}
       target="_blank"
       rel="noreferrer noopener"
-      title={`${workflowName} #${run.runNumber} — ${run.event} — ${formatAbsolute(run.createdAt)}`}
+      title={offTrunk ? `${title} — never ran on the default branch, so it is not counted` : title}
     >
       <StatusIcon state={run.state} />
       <span className="run__workflow">
@@ -64,18 +71,24 @@ export interface IWorkflowLineProps {
 }
 
 /**
- * The latest run of a single workflow, or a placeholder when it never ran.
+ * The default branch's latest run of a single workflow.
+ *
+ * When the workflow has never run on the default branch, its newest run stands in so that the
+ * line is not simply blank, but dimmed to say that it does not represent the repository. The
+ * counts, the filters and the favicon ignore it.
  */
 export function WorkflowLine({ group, now }: IWorkflowLineProps) {
-  const latest = group.primary;
-  if (latest === undefined) {
-    return (
-      <div className="run run--empty">
-        <StatusIcon state="unknown" />
-        <span className="run__workflow">{group.name}</span>
-        <span className="run__commit run__commit--muted">No runs yet</span>
-      </div>
-    );
+  if (group.primary !== undefined) {
+    return <RunLine run={group.primary} workflowName={group.name} now={now} />;
   }
-  return <RunLine run={latest} workflowName={group.name} now={now} />;
+  if (group.latest !== undefined) {
+    return <RunLine run={group.latest} workflowName={group.name} now={now} offTrunk />;
+  }
+  return (
+    <div className="run run--empty">
+      <StatusIcon state="unknown" />
+      <span className="run__workflow">{group.name}</span>
+      <span className="run__commit run__commit--muted">No runs yet</span>
+    </div>
+  );
 }

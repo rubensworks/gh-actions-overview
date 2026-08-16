@@ -120,28 +120,44 @@ export function SetupScreen({ onConnect, onBrowse, initialError }: ISetupScreenP
         <section className="setup__section">
           <h2>Which permissions does it need?</h2>
           <p>
+            Less than you would expect.{' '}
             <a className="link" href={TOKEN_URL} target="_blank" rel="noreferrer noopener">
               Create a fine-grained token
-            </a> with <strong>read-only</strong> access and nothing more:
+            </a> and work down the form:
           </p>
           <ul className="setup__list">
+            <li>
+              <strong>Resource owner</strong> — the setting that actually decides what the token can
+              reach. A token only ever sees repositories owned by this one account, so pick yourself
+              for your own repositories, and see the note below for organisations.
+            </li>
             <li>
               <strong>Repository access</strong> — “All repositories”, or hand-pick the ones you want
               on the dashboard.
             </li>
             <li>
-              <strong>Repository permissions → Metadata: read-only.</strong> Mandatory for every
-              fine-grained token, and what lets the app list your repositories.
-            </li>
-            <li>
-              <strong>Repository permissions → Actions: read-only.</strong> What exposes workflows
-              and workflow runs.
+              <strong>Repository permissions → Actions: read-only</strong> — needed for{' '}
+              <em>private</em> repositories, and the only permission you have to set by hand. It sits
+              near the top of a long alphabetical list, and picking it also sets{' '}
+              <strong>Metadata: read-only</strong> for you: metadata is mandatory for every
+              fine-grained token, which is why there is no separate checkbox to tick for it.
             </li>
           </ul>
           <p className="setup__note">
-            Nothing else is required: no write scopes, no organisation permissions, no account
-            permissions. For repositories owned by an organisation, an owner may still have to
-            approve the token before it can see them.
+            <strong>Only public repositories?</strong> Then tick nothing at all. Fine-grained tokens
+            carry read-only access to public data on their own, which is why a freshly created token
+            with no permissions selected already works — it just cannot see anything private.
+          </p>
+          <p className="setup__note">
+            <strong>Organisations</strong> are a separate token. Because a token is bound to one
+            resource owner, the one you made for your own account cannot list an organisation&apos;s
+            private repositories, and asking for them comes back as <em>access forbidden</em>. Adding
+            an organisation in the settings still works — the dashboard falls back to its public
+            repositories. For the private ones, create a second token with the organisation as its
+            resource owner, which an organisation owner may have to approve first.
+          </p>
+          <p className="setup__note">
+            No write scopes, no account permissions, and no classic-PAT scopes are needed anywhere.
           </p>
         </section>
 

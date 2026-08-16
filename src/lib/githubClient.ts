@@ -37,6 +37,7 @@ interface IApiRepo {
   archived: boolean;
   pushed_at: string | null;
   default_branch: string;
+  stargazers_count?: number;
   owner: IApiOwner;
 }
 
@@ -124,7 +125,7 @@ export function describeError(error: unknown): string {
     case 403:
       return httpError.message.toLowerCase().includes('rate limit') ?
         'Rate limit exceeded' :
-        'Access forbidden — the token is missing the required permissions';
+        'Access forbidden — a fine-grained token only reaches the owner it was created for';
     case 404:
       return 'Not found — Actions may be disabled, or the token has no access';
     case 451:
@@ -177,6 +178,7 @@ function toRepoRef(repo: IApiRepo, source: RepoSource): IRepoRef {
     archived: repo.archived,
     pushedAt: repo.pushed_at ?? '1970-01-01T00:00:00Z',
     defaultBranch: repo.default_branch,
+    stars: repo.stargazers_count ?? 0,
     source,
   };
 }
@@ -277,11 +279,24 @@ export class GitHubClient {
 
   /**
    * Lists the repositories of an organisation, most recently pushed first.
+   *
+   * A fine-grained token is bound to a single resource owner, so listing an organisation it was
+   * not created for is forbidden even though that organisation's public repositories are perfectly
+   * readable with it. Rather than dropping the organisation, this falls back to the public listing,
+   * which costs the private repositories and nothing else.
    * @param org An organisation login.
    * @param cutoff Unix timestamp in milliseconds; repositories pushed before this are irrelevant.
    */
   public async listOrgRepos(org: string, cutoff: number): Promise<IRepoRef[]> {
-    return this.listRepoPages('GET /orgs/{org}/repos', { org }, 'org', cutoff);
+    try {
+      return await this.listRepoPages('GET /orgs/{org}/repos', { org }, 'org', cutoff);
+    } catch (error: unknown) {
+      const status = asHttpError(error)?.status;
+      if (status !== 403 && status !== 404) {
+        throw error;
+      }
+      return this.listRepoPages('GET /users/{username}/repos', { username: org }, 'org', cutoff);
+    }
   }
 
   /**
@@ -308,15 +323,40 @@ export class GitHubClient {
 
   /**
    * Fetches the most recent workflow runs of a repository, grouped per workflow.
+   *
+   * The ten newest runs are usually enough to describe every workflow, but a repository whose
+   * pull requests come in batches — anything Renovate or Dependabot tends — can fill that window
+   * entirely with side branches and leave the default branch, the branch this dashboard reports
+   * on, out of it. When that happens a second, branch-filtered request goes out to find the runs
+   * that actually matter. It is conditional like every other request, so once the default branch
+   * is quiet it is answered with a `304` and costs no quota.
    * @param repo A repository reference.
    * @param workflows The workflows known for this repository.
    */
   public async listRuns(repo: IRepoRef, workflows: IWorkflowDefinition[]): Promise<IWorkflowGroup[]> {
+    const runs = await this.fetchRuns(repo);
+    const groups = groupRuns(runs, workflows, repo.defaultBranch);
+    if (!groups.some(group => group.latest !== undefined && group.primary === undefined)) {
+      return groups;
+    }
+    const onDefaultBranch = await this.fetchRuns(repo, repo.defaultBranch);
+    return groupRuns(mergeRuns(runs, onDefaultBranch), workflows, repo.defaultBranch);
+  }
+
+  private async fetchRuns(repo: IRepoRef, branch?: string): Promise<IWorkflowRun[]> {
+    const parameters: Record<string, unknown> = {
+      owner: repo.owner,
+      repo: repo.name,
+      per_page: RUNS_PER_REPO,
+    };
+    if (branch !== undefined) {
+      parameters.branch = branch;
+    }
     const { data } = await this.conditionalRequest<IApiRunList>(
       'GET /repos/{owner}/{repo}/actions/runs',
-      { owner: repo.owner, repo: repo.name, per_page: RUNS_PER_REPO },
+      parameters,
     );
-    return groupRuns(data.workflow_runs.map(run => toWorkflowRun(run)), workflows, repo.defaultBranch);
+    return data.workflow_runs.map(run => toWorkflowRun(run));
   }
 
   private async listRepoPages(
@@ -388,6 +428,15 @@ export class GitHubClient {
   }
 }
 
+// Two run listings of the same repository overlap, so identity is by run id.
+function mergeRuns(left: IWorkflowRun[], right: IWorkflowRun[]): IWorkflowRun[] {
+  const byId = new Map(left.map(run => [ run.id, run ]));
+  for (const run of right) {
+    byId.set(run.id, run);
+  }
+  return [ ...byId.values() ];
+}
+
 /**
  * Groups runs per workflow, newest first, keeping workflows without runs.
  * @param runs Workflow runs of a single repository.
@@ -408,6 +457,7 @@ export function groupRuns(
         name: workflow.name,
         runs: [],
         primary: undefined,
+        latest: undefined,
       });
     }
   }
@@ -419,6 +469,7 @@ export function groupRuns(
         name: run.workflowName,
         runs: [ run ],
         primary: undefined,
+        latest: undefined,
       });
     } else {
       existing.runs.push(run);
@@ -427,8 +478,10 @@ export function groupRuns(
   const result = [ ...groups.values() ];
   for (const group of result) {
     group.runs.sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
-    // The default branch speaks for the workflow, however long ago it last ran there.
-    group.primary = group.runs.find(run => run.branch === defaultBranch) ?? group.runs[0];
+    // The default branch speaks for the workflow, however long ago it last ran there. When it has
+    // never run there, nothing speaks for the workflow: `latest` is only ever shown, never counted.
+    group.primary = group.runs.find(run => run.branch === defaultBranch);
+    group.latest = group.runs[0];
   }
   // Workflows that have runs come first, so that dormant workflows do not push live ones out of sight.
   result.sort((left, right) => {

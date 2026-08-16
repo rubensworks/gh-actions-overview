@@ -758,14 +758,33 @@ a.run:hover .run__open {
   opacity: 1;
 }
 
-.run--empty,
-.run--error {
+/*
+ * The "no runs yet" line has an icon, a workflow name and a message, so it needs three columns.
+ * With two, the message wrapped onto an implicit second row inside the 14px icon column and was
+ * ellipsised down to a stray "N…".
+ */
+.run--empty {
   color: var(--text-faint);
-  grid-template-columns: 14px minmax(0, 1fr);
+  grid-template-columns: 14px minmax(80px, 190px) minmax(0, 1fr);
+}
+
+.run--error,
+.run--loading {
+  color: var(--text-faint);
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .run--error .run__commit {
   color: var(--failure);
+}
+
+/* A run that stands in for a default branch that never ran this workflow: shown, but discounted. */
+a.run--off-trunk {
+  opacity: 0.55;
+}
+
+a.run--off-trunk:hover {
+  opacity: 1;
 }
 
 .skeleton {
@@ -870,6 +889,8 @@ a.run:hover .run__open {
 }
 
 .drawer__subtitle {
+  margin: 2px 0 0;
+  color: var(--text-faint);
   font-size: 12px;
 }
 

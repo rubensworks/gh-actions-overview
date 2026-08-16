@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { RunLine, WorkflowLine } from '../../src/components/workflow-line';
-import { NOW, workflowGroup, workflowRun } from '../fixtures';
+import { NOW, offTrunkGroup, workflowGroup, workflowRun } from '../fixtures';
 
 afterEach(cleanup);
 
@@ -56,5 +56,40 @@ describe('WorkflowLine', () => {
     expect(screen.getByText('Nightly')).toBeDefined();
     expect(screen.getByText('No runs yet')).toBeDefined();
     expect(container.querySelector('a')).toBeNull();
+  });
+
+  it('gives the no-runs line a column for its message, so it is not clipped to a stray "N."', () => {
+    const { container } = render(<WorkflowLine group={workflowGroup('Nightly', [])} now={NOW} />);
+    // Three children, three columns: the message must not wrap into the 14px icon column.
+    expect(container.querySelector('.run--empty')?.children).toHaveLength(3);
+  });
+
+  describe('when the default branch never ran the workflow', () => {
+    const group = offTrunkGroup('CI', [
+      workflowRun('failure', { branch: 'renovate/actions-checkout-7' }),
+    ]);
+
+    it('shows the newest run it does have', () => {
+      render(<WorkflowLine group={group} now={NOW} />);
+      expect(screen.getByText('renovate/actions-checkout-7')).toBeDefined();
+    });
+
+    it('dims it, because it does not represent the repository', () => {
+      const { container } = render(<WorkflowLine group={group} now={NOW} />);
+      expect(container.querySelector('.run--off-trunk')).not.toBeNull();
+    });
+
+    it('says why in the tooltip', () => {
+      const { container } = render(<WorkflowLine group={group} now={NOW} />);
+      expect(container.querySelector('a')?.getAttribute('title'))
+        .toContain('never ran on the default branch');
+    });
+
+    it('leaves a default-branch run undimmed', () => {
+      const { container } = render(
+        <WorkflowLine group={workflowGroup('CI', [ workflowRun('failure') ])} now={NOW} />,
+      );
+      expect(container.querySelector('.run--off-trunk')).toBeNull();
+    });
   });
 });

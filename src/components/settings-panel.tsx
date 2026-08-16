@@ -164,7 +164,10 @@ export function SettingsPanel(props: ISettingsPanelProps) {
       </div>
 
       <p className="settings__hint">
-        Pinned repositories are always shown, even when they fall outside the push window.
+        Pinned repositories are always shown, even when they fall outside the push window. An
+        organisation your token was not created for still lists its public repositories: a
+        fine-grained token only reaches its own resource owner, so seeing an organisation&apos;s
+        private repositories takes a second token created with that organisation as the owner.
       </p>
 
       <form className="settings__token" onSubmit={submitToken}>
