@@ -30,6 +30,55 @@ describe('RepoRow', () => {
     expect(container.querySelectorAll('.run')).toHaveLength(2);
   });
 
+  // A workflow that has never run anywhere is noise on the dashboard — release workflows,
+  // manual-dispatch jobs, a workflow file just added. The drawer is the place to see it.
+  describe('workflows with no runs', () => {
+    it('hides a workflow that has never run, alongside one that has', () => {
+      const repo = repoState('a/b', {
+        workflows: [
+          workflowGroup('CI', [ workflowRun('success') ], 1),
+          workflowGroup('Nightly', [], 2),
+        ],
+      });
+      const { container } = render(<RepoRow repo={repo} now={NOW} onOpen={noop} />);
+      expect(container.querySelectorAll('.run')).toHaveLength(1);
+      expect(screen.queryByText('Nightly')).toBeNull();
+    });
+
+    it('still shows a workflow that ran on a side branch, not the default one', () => {
+      const repo = repoState('a/b', {
+        workflows: [ offTrunkGroup('CI', [ workflowRun('failure', { branch: 'spike' }) ]) ],
+      });
+      render(<RepoRow repo={repo} now={NOW} onOpen={noop} />);
+      expect(screen.getByText('CI')).toBeDefined();
+    });
+
+    it('explains an otherwise-empty row when every workflow is hidden', () => {
+      const repo = repoState('a/b', {
+        workflows: [ workflowGroup('CI', [], 1), workflowGroup('Nightly', [], 2) ],
+      });
+      const { container } = render(<RepoRow repo={repo} now={NOW} onOpen={noop} />);
+      expect(container.querySelectorAll('.run')).toHaveLength(1);
+      expect(screen.getByText('No workflow runs yet')).toBeDefined();
+    });
+
+    it('does not show that fallback while still reloading', () => {
+      const repo = repoState('a/b', {
+        load: 'loading',
+        workflows: [ workflowGroup('CI', [], 1) ],
+      });
+      render(<RepoRow repo={repo} now={NOW} onOpen={noop} />);
+      expect(screen.queryByText('No workflow runs yet')).toBeNull();
+    });
+
+    it('does not show that fallback for a repository with no workflows at all', () => {
+      const repo = repoState('a/b', { load: 'loaded', workflows: []});
+      const { container } = render(<RepoRow repo={repo} now={NOW} onOpen={noop} />);
+      expect(container.querySelectorAll('.run')).toHaveLength(0);
+      expect(screen.queryByText('No workflow runs yet')).toBeNull();
+    });
+  });
+
   it('opens the drawer when the name is clicked', () => {
     const onOpen = vi.fn();
     render(<RepoRow repo={repoState('a/b')} now={NOW} onOpen={onOpen} />);

@@ -2,7 +2,14 @@ import { type Mock, afterEach, beforeEach, describe, expect, it, vi } from 'vite
 import type { IDashboardScope, IFailureEvent } from '../src/lib/dashboardStore';
 import { DashboardStore, INITIAL_STATE } from '../src/lib/dashboardStore';
 import type { GitHubClient, IWorkflowDefinition } from '../src/lib/githubClient';
-import type { IRateLimit, IRepoRef, IRepoState, ISettings, IWorkflowGroup } from '../src/lib/types';
+import type {
+  IRateLimit,
+  IRepoRef,
+  IRepoState,
+  ISettings,
+  IWorkflowGroup,
+  RepoSource,
+} from '../src/lib/types';
 import { repoRef, settings, workflowGroup, workflowRun } from './fixtures';
 
 const NOW = Date.parse('2026-05-01T12:00:00Z');
@@ -10,6 +17,7 @@ const RESET = Math.floor(NOW / 1000) + 1800;
 const ACTIVE_REFRESH_MS = 15_000;
 const IDLE_MIN_MS = 120_000;
 const IDLE_MAX_MS = 300_000;
+const TICK_MS = 2000;
 
 const CI: IWorkflowDefinition = { id: 10, name: 'CI', state: 'active', path: '.github/workflows/ci.yml' };
 
@@ -17,7 +25,7 @@ interface IFakeClient {
   rateLimit: IRateLimit | undefined;
   listUserRepos: Mock<(cutoff: number) => Promise<IRepoRef[]>>;
   listOrgRepos: Mock<(org: string, cutoff: number) => Promise<IRepoRef[]>>;
-  getRepo: Mock<(owner: string, name: string) => Promise<IRepoRef>>;
+  getRepo: Mock<(owner: string, name: string, source?: RepoSource) => Promise<IRepoRef>>;
   listOwnerRepos: Mock<(login: string, cutoff: number) => Promise<IRepoRef[]>>;
   listWorkflows: Mock<(repo: IRepoRef) => Promise<IWorkflowDefinition[]>>;
   listRuns: Mock<(repo: IRepoRef, workflows: IWorkflowDefinition[]) => Promise<IWorkflowGroup[]>>;
@@ -40,7 +48,10 @@ function makeClient(): IFakeClient {
     rateLimit: { limit: 5000, remaining: 4999, reset: RESET },
     listUserRepos: vi.fn(async(): Promise<IRepoRef[]> => [ repoRef('rubensworks/jbr.js') ]),
     listOrgRepos: vi.fn(async(): Promise<IRepoRef[]> => []),
-    getRepo: vi.fn(async(): Promise<IRepoRef> => repoRef('rubensworks/pinned', { source: 'manual' })),
+    // Defaults to echoing back whatever owner/name was asked for, so a call this test does not
+    // care about (the pushed-time refresh) cannot silently rename an unrelated repository.
+    getRepo: vi.fn(async(owner: string, name: string, source: RepoSource = 'manual'): Promise<IRepoRef> =>
+      repoRef(`${owner}/${name}`, { source })),
     listOwnerRepos: vi.fn(async(): Promise<IRepoRef[]> => [ repoRef('comunica/comunica', { source: 'owner' }) ]),
     listWorkflows: vi.fn(async(): Promise<IWorkflowDefinition[]> => [ CI ]),
     listRuns: vi.fn(async(): Promise<IWorkflowGroup[]> =>
@@ -524,6 +535,112 @@ describe('polling intervals', () => {
     await boot(store);
     expect(store.getSnapshot().backoffUntil).toBe(RESET * 1000);
     expect(store.getSnapshot().backoffReason).toContain('Almost out of API quota');
+    store.stop();
+  });
+});
+
+// A push is almost always what triggered the run, but "pushed X ago" only comes from the
+// repository listing, which refreshes every ten minutes. The moment a run turns active, a single
+// extra request closes that gap immediately instead of leaving a stale badge next to a live run.
+describe('the pushed time', () => {
+  it('is not refreshed for a repository with nothing active', async() => {
+    const { store, client } = harness();
+    await boot(store);
+    expect(client.getRepo).not.toHaveBeenCalled();
+    store.stop();
+  });
+
+  it('is refreshed the moment a run turns active', async() => {
+    const client = makeClient();
+    client.listRuns.mockResolvedValue([ workflowGroup('CI', [ workflowRun('running') ]) ]);
+    const { store } = harness({}, client);
+    await boot(store);
+    expect(client.getRepo).toHaveBeenCalledWith('rubensworks', 'jbr.js', 'user');
+    store.stop();
+  });
+
+  it('replaces the repository metadata with the freshly fetched copy', async() => {
+    const client = makeClient();
+    client.listRuns.mockResolvedValue([ workflowGroup('CI', [ workflowRun('running') ]) ]);
+    client.getRepo.mockResolvedValue(repoRef('rubensworks/jbr.js', { pushedAt: '2026-05-01T11:59:00Z' }));
+    const { store } = harness({}, client);
+    await boot(store);
+    expect(repoByKey(store, 'rubensworks/jbr.js')?.repo.pushedAt).toBe('2026-05-01T11:59:00Z');
+    store.stop();
+  });
+
+  it('is fetched once per active episode, not on every 15-second tick', async() => {
+    const client = makeClient();
+    client.listRuns.mockResolvedValue([ workflowGroup('CI', [ workflowRun('running') ]) ]);
+    const { store } = harness({}, client);
+    await boot(store);
+    expect(client.getRepo).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(ACTIVE_REFRESH_MS);
+    expect(client.getRepo).toHaveBeenCalledTimes(1);
+    store.stop();
+  });
+
+  it('is fetched again for a second episode once the run finishes', async() => {
+    const client = makeClient();
+    // A state machine rather than a fixed sequence of mock values, so it does not matter exactly
+    // which tick each `listRuns` call lands on: running, then one quiet call to close the first
+    // episode out, then running again for the second one.
+    let phase: 'running-1' | 'quiet' | 'running-2' = 'running-1';
+    client.listRuns.mockImplementation(async() => {
+      const state = phase === 'quiet' ? 'success' : 'running';
+      if (phase === 'running-1') {
+        phase = 'quiet';
+      } else if (phase === 'quiet') {
+        phase = 'running-2';
+      }
+      return [ workflowGroup('CI', [ workflowRun(state) ]) ];
+    });
+    const { store } = harness({}, client);
+    await boot(store);
+    expect(client.getRepo).toHaveBeenCalledTimes(1);
+
+    // Comfortably past both the active interval and the tick grid, so the quiet call is bound to
+    // have happened by now, closing the first episode.
+    await vi.advanceTimersByTimeAsync(ACTIVE_REFRESH_MS + TICK_MS);
+    expect(phase).toBe('running-2');
+
+    // And past the idle interval, so the second episode's running call has happened too.
+    await vi.advanceTimersByTimeAsync(IDLE_MAX_MS + TICK_MS);
+    expect(client.getRepo).toHaveBeenCalledTimes(2);
+    store.stop();
+  });
+
+  it('is refreshed for an active run on a side branch too', async() => {
+    const client = makeClient();
+    client.listRuns.mockResolvedValue([
+      workflowGroup('CI', [ workflowRun('running', { branch: 'feature' }) ]),
+    ]);
+    const { store } = harness({}, client);
+    await boot(store);
+    // `pushed_at` covers every branch, not just the default one, so this follows the same "is
+    // anything in flight" test the fast poll interval already uses — see "polling intervals".
+    expect(client.getRepo).toHaveBeenCalledWith('rubensworks', 'jbr.js', 'user');
+    store.stop();
+  });
+
+  it('survives a failed refresh without crashing the store', async() => {
+    const client = makeClient();
+    client.listRuns.mockResolvedValue([ workflowGroup('CI', [ workflowRun('running') ]) ]);
+    client.getRepo.mockRejectedValue(new HttpError(500, 'kaboom'));
+    const { store } = harness({}, client);
+    await boot(store);
+    expect(repoByKey(store, 'rubensworks/jbr.js')?.repo.pushedAt).toBe('2026-05-01T11:00:00Z');
+    expect(store.getSnapshot().repos).toHaveLength(1);
+    store.stop();
+  });
+
+  it('uses the token that belongs to the repository’s own owner', async() => {
+    const client = makeClient();
+    client.listOwnerRepos.mockResolvedValue([ repoRef('comunica/comunica', { source: 'owner' }) ]);
+    client.listRuns.mockResolvedValue([ workflowGroup('CI', [ workflowRun('running') ]) ]);
+    const { store } = harness({}, client, { owner: 'comunica', anonymous: false });
+    await boot(store);
+    expect(client.getRepo).toHaveBeenCalledWith('comunica', 'comunica', 'owner');
     store.stop();
   });
 });

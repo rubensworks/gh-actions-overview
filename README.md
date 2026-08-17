@@ -33,9 +33,18 @@ this app ever talks to is `api.github.com`, straight from your browser.
 - **Smart polling.** Repositories with a queued or running workflow refresh every 15 seconds;
   quiet ones every 2–5 minutes, jittered so requests do not arrive in bursts. Polling pauses
   entirely while the tab is hidden.
+- **The "pushed X ago" badge catches up the moment a run starts.** A workflow is almost always
+  triggered by the push that just landed, but that timestamp otherwise only comes from the
+  repository list, which refreshes every ten minutes. The instant a run is seen as active, one
+  extra request refreshes that repository's own metadata, so the badge stops lying about "6h ago"
+  next to a run that is visibly building right now.
 - **Cheap polling.** Every request is conditional (`If-None-Match`). GitHub answers unchanged data
   with `304 Not Modified`, which does not count against your REST rate limit. The remaining quota
   is always visible in the footer.
+- **Workflows that have never run are out of the way.** A release workflow that only triggers on a
+  tag, a manual-dispatch job, a workflow file that was just added — none of them earn a line on the
+  dashboard until they have actually run once. Click through to a repository's drawer to see them
+  listed anyway, alongside everything else.
 - **Filters** for failures, running workflows, owner, and free-text search across repository,
   workflow, branch and commit message. The whole view lives in the URL fragment, so views are
   bookmarkable and shareable — and being a fragment, it is never sent to any server.
@@ -219,8 +228,14 @@ costs no quota.
 If a workflow has genuinely never run on the default branch, its newest run is shown **greyed out**
 instead, and counts towards nothing: not the *Failing* tally, not the filters, and not the favicon.
 
-The repository drawer is unaffected and still lists every run of every workflow in chronological
-order, side branches included, with links to both the repository and its Actions tab.
+A workflow that has **never run at all**, on any branch — no line to grey out, nothing to show — is
+left off the row entirely rather than padded out with a muted "No runs yet". A repository with a
+release workflow that only fires on a tag, or a job that only runs on a schedule, does not carry a
+row of placeholders for every workflow that has not had its moment yet.
+
+The repository drawer is unaffected by either of those and still lists every workflow, including the
+ones with nothing to show, and every run of every workflow in chronological order, side branches
+included, with links to both the repository and its Actions tab.
 
 ## Ordering
 

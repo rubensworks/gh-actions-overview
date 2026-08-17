@@ -830,13 +830,18 @@ a.run:hover .run__open {
 }
 
 .run--error,
-.run--loading {
+.run--loading,
+.run--dormant {
   color: var(--text-faint);
   grid-template-columns: minmax(0, 1fr);
 }
 
 .run--error .run__commit {
   color: var(--failure);
+}
+
+.run--dormant .run__commit {
+  font-style: italic;
 }
 
 /* A run that stands in for a default branch that never ran this workflow: shown, but discounted. */
