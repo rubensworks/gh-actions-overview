@@ -30,6 +30,15 @@ const LOW_QUOTA_FACTOR = 5;
 // enough to leave room for polling. Conditional requests answered with 304 are free after that.
 const ANONYMOUS_REPO_LIMIT = 15;
 
+// Any in-flight run keeps a repository interesting, even one on a side branch: a running workflow
+// is what this whole store polls fast for.
+function hasActiveRun(workflows: IWorkflowGroup[]): boolean {
+  return workflows.some((group) => {
+    const latest = group.runs[0];
+    return latest !== undefined && isActive(latest.state);
+  });
+}
+
 // Thresholds are a fraction of the quota, because an anonymous budget is 60 and a token's is 5000.
 function lowQuota(limit: number): number {
   return Math.max(8, Math.round(limit * 0.06));
@@ -105,6 +114,9 @@ export class DashboardStore {
   private repoListInFlight = false;
   private commitDatesWanted = false;
   private readonly commitInFlight = new Set<string>();
+  // Repositories whose "pushed X ago" has already been refreshed for the run that is currently
+  // active, so a workflow that stays running for an hour does not trigger an extra fetch every tick.
+  private readonly pushedAtFreshFor = new Set<string>();
   private readonly onVisibilityChange: () => void;
 
   public constructor(
@@ -450,11 +462,46 @@ export class DashboardStore {
         workflowsFetchedAt,
         nextRefresh: Date.now() + this.intervalFor(workflows),
       });
+      this.trackPushedAt(ref, workflows);
     } catch (error: unknown) {
       this.handleRepoError(ref, error);
     } finally {
       this.inFlight.delete(ref.key);
       this.patch({ lastRefreshedAt: Date.now(), rateLimit: this.client.rateLimit });
+    }
+  }
+
+  /**
+   * Refreshes a repository's own metadata — chiefly `pushed_at` — the moment a run turns active.
+   *
+   * The repository listing that `pushed_at` comes from is only refreshed every ten minutes, but a
+   * workflow run is almost always triggered by the push that just landed. Waiting out that ten
+   * minutes would leave a stale "pushed 3h ago" sitting next to a workflow that is visibly running
+   * right now. One extra request closes that gap immediately — once per active episode, not once
+   * per 15-second tick, so a run that stays busy for an hour costs exactly one of these.
+   * @param ref The repository as it stood before this refresh.
+   * @param workflows The workflows just fetched for it.
+   */
+  private trackPushedAt(ref: IRepoRef, workflows: IWorkflowGroup[]): void {
+    if (!hasActiveRun(workflows)) {
+      this.pushedAtFreshFor.delete(ref.key);
+      return;
+    }
+    if (this.pushedAtFreshFor.has(ref.key)) {
+      return;
+    }
+    this.pushedAtFreshFor.add(ref.key);
+    this.refreshPushedAt(ref).catch(ignoreRejection);
+  }
+
+  private async refreshPushedAt(ref: IRepoRef): Promise<void> {
+    try {
+      const fresh = await this.client.getRepo(ref.owner, ref.name, ref.source);
+      this.updateRepo(ref.key, { repo: fresh });
+    } catch (error: unknown) {
+      this.handleGlobalError(error);
+    } finally {
+      this.patch({ rateLimit: this.client.rateLimit });
     }
   }
 
@@ -524,12 +571,7 @@ export class DashboardStore {
       });
       return IDLE_MAX_MS;
     }
-    const busy = workflows.some((group) => {
-      // Any in-flight run keeps the repository on the fast interval, even on a side branch.
-      const latest = group.runs[0];
-      return latest !== undefined && isActive(latest.state);
-    });
-    const base = busy ?
+    const base = hasActiveRun(workflows) ?
       ACTIVE_REFRESH_MS :
       IDLE_MIN_MS + Math.floor(Math.random() * (IDLE_MAX_MS - IDLE_MIN_MS));
     const scarce = rateLimit !== undefined && rateLimit.remaining < lowQuota(rateLimit.limit);

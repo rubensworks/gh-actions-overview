@@ -36,6 +36,10 @@ export interface IRepoRowProps {
  */
 export function RepoRow({ repo, now, onOpen }: IRepoRowProps) {
   const status = repoStatus(repo);
+  // A workflow that has never run anywhere is not worth a line on the dashboard — it is noise for
+  // release workflows, manual-dispatch jobs and freshly added files. The drawer still lists every
+  // workflow regardless, since it is a deliberate look at one repository's whole history.
+  const shownWorkflows = repo.workflows.filter(group => group.latest !== undefined);
   return (
     <div className={`repo-row repo-row--${status}`}>
       <div className="repo-row__meta">
@@ -72,9 +76,17 @@ export function RepoRow({ repo, now, onOpen }: IRepoRowProps) {
             ) :
           null}
 
-        {repo.workflows.map(group => (
+        {shownWorkflows.map(group => (
           <WorkflowLine key={group.workflowId} group={group} now={now} />
         ))}
+
+        {repo.load === 'loaded' && repo.workflows.length > 0 && shownWorkflows.length === 0 ?
+            (
+              <div className="run run--dormant">
+                <span className="run__commit">No workflow runs yet</span>
+              </div>
+            ) :
+          null}
       </div>
     </div>
   );

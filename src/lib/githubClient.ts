@@ -364,14 +364,17 @@ export class GitHubClient {
    * Resolves a single `owner/repo` entry.
    * @param owner A repository owner.
    * @param name A repository name.
+   * @param source How this repository ended up being monitored, carried through onto the result.
+   *   Defaults to `manual`, which is what every existing caller of this method wants: resolving a
+   *   pinned `owner/repo` entry.
    */
-  public async getRepo(owner: string, name: string): Promise<IRepoRef> {
+  public async getRepo(owner: string, name: string, source: RepoSource = 'manual'): Promise<IRepoRef> {
     const { data } = await this.conditionalRequest<IApiRepo>(
       'GET /repos/{owner}/{repo}',
       { owner, repo: name },
       owner,
     );
-    return toRepoRef(data, 'manual');
+    return toRepoRef(data, source);
   }
 
   /**
