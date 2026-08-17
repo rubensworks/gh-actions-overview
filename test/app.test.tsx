@@ -133,6 +133,58 @@ describe('App', () => {
     expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
   });
 
+  // A stored token is only actually bad on a 401. Anything else — an outage, a rate limit, a
+  // network hiccup — says nothing about the token, and wiping it would force pasting a fresh one
+  // in for a credential that was fine all along.
+  describe('a transient failure while checking the stored token', () => {
+    it('keeps the token when GitHub is down', async() => {
+      localStorage.setItem(TOKEN_KEY, 'still-good');
+      getViewerMock.mockRejectedValue(Object.assign(new Error('Service Unavailable'), { status: 503 }));
+      render(<App />);
+      await waitFor(() => expect(screen.getByRole('alert')).toBeDefined());
+      expect(localStorage.getItem(TOKEN_KEY)).toBe('still-good');
+    });
+
+    it('keeps the token when the request is rate limited', async() => {
+      localStorage.setItem(TOKEN_KEY, 'still-good');
+      getViewerMock.mockRejectedValue(Object.assign(new Error('API rate limit exceeded'), { status: 403 }));
+      render(<App />);
+      await waitFor(() => expect(screen.getByRole('alert')).toBeDefined());
+      expect(localStorage.getItem(TOKEN_KEY)).toBe('still-good');
+    });
+
+    it('keeps the token on a plain network failure with no HTTP status at all', async() => {
+      localStorage.setItem(TOKEN_KEY, 'still-good');
+      getViewerMock.mockRejectedValue(new TypeError('Failed to fetch'));
+      render(<App />);
+      await waitFor(() => expect(screen.getByRole('alert')).toBeDefined());
+      expect(localStorage.getItem(TOKEN_KEY)).toBe('still-good');
+    });
+
+    it('keeps a session-stored token too', async() => {
+      sessionStorage.setItem(TOKEN_KEY, 'still-good');
+      getViewerMock.mockRejectedValue(Object.assign(new Error('Bad Gateway'), { status: 502 }));
+      render(<App />);
+      await waitFor(() => expect(screen.getByRole('alert')).toBeDefined());
+      expect(sessionStorage.getItem(TOKEN_KEY)).toBe('still-good');
+    });
+
+    it('reassures the user the token is safe and worth retrying', async() => {
+      localStorage.setItem(TOKEN_KEY, 'still-good');
+      getViewerMock.mockRejectedValue(Object.assign(new Error('Service Unavailable'), { status: 503 }));
+      render(<App />);
+      await waitFor(() =>
+        expect(screen.getByRole('alert').textContent).toContain('has not been cleared'));
+    });
+
+    it('still shows the setup screen, since there is no session to fall back to', async() => {
+      localStorage.setItem(TOKEN_KEY, 'still-good');
+      getViewerMock.mockRejectedValue(Object.assign(new Error('Service Unavailable'), { status: 503 }));
+      render(<App />);
+      await waitFor(() => expect(screen.getByPlaceholderText('github_pat_...')).toBeDefined());
+    });
+  });
+
   it('connects with a pasted token and remembers it', async() => {
     render(<App />);
     await waitFor(() => expect(screen.getByPlaceholderText('github_pat_...')).toBeDefined());

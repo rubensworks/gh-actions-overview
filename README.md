@@ -149,6 +149,10 @@ The short version: **your token never leaves your browser.**
   `https://api.github.com`. No other host is ever contacted; there are no third-party scripts,
   fonts, or trackers on the page.
 - **Sign out** removes the token from both storages.
+- The stored token is only ever *cleared automatically* on a genuine `401` — GitHub actually
+  rejecting it as invalid, expired, or revoked. An outage, a rate limit, or a network hiccup while
+  checking it at startup leaves the token exactly where it was and says so on the setup screen;
+  reloading the page once GitHub recovers is enough, with nothing to paste back in.
 
 What this model does *not* protect against, so that you can judge it for yourself:
 
