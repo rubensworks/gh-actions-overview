@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Dashboard } from './components/dashboard';
 import { SetupScreen } from './components/setup-screen';
-import { GitHubClient, describeError } from './lib/githubClient';
+import { GitHubClient, asHttpError, describeError } from './lib/githubClient';
 import {
   clearOwnerTokens,
   clearToken,
@@ -148,9 +148,22 @@ export function App() {
       })
       .catch((error: unknown) => {
         if (!cancelled) {
-          clearToken();
-          setTokenAt('none');
-          setAuthError(`Stored token could not be used: ${describeError(error)}`);
+          // Only a 401 means the token itself is bad — expired, revoked, or never valid — and is
+          // worth throwing away. Everything else (an outage, a rate limit, a network hiccup, a
+          // proxy timeout) says nothing about the token, and clearing it would force a trip back
+          // to GitHub's token-creation page for a credential that was fine all along. Leaving it
+          // in storage means the retry the user reaches for — a plain page reload — is enough.
+          if (asHttpError(error)?.status === 401) {
+            clearToken();
+            setTokenAt('none');
+            setAuthError(`Stored token could not be used: ${describeError(error)}`);
+          } else {
+            setAuthError(
+              `Could not reach GitHub with your stored token: ${describeError(error)}. ` +
+              'The token has not been cleared — this is likely temporary, so reloading the page ' +
+              'is worth trying again before pasting a new one.',
+            );
+          }
         }
       })
       .finally(() => {
