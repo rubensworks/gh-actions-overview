@@ -17,7 +17,7 @@ const { FakeStore } = vi.hoisted(() => {
     repoListError: undefined,
     rateLimit: undefined,
     lastRefreshedAt: undefined,
-    paused: false,
+    backgrounded: false,
     backoffUntil: undefined,
     backoffReason: undefined,
   };

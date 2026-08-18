@@ -738,46 +738,60 @@ describe('backing off', () => {
 });
 
 describe('tab visibility', () => {
-  it('pauses while the tab is hidden', async() => {
+  it('keeps polling while the tab is hidden, so the favicon stays accurate', async() => {
     const { store, client } = harness();
     await boot(store);
     client.listRuns.mockClear();
 
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
     await vi.advanceTimersByTimeAsync(600_000);
-    expect(store.getSnapshot().paused).toBe(true);
-    expect(client.listRuns).not.toHaveBeenCalled();
+    expect(store.getSnapshot().backgrounded).toBe(true);
+    expect(client.listRuns).toHaveBeenCalled();
 
-    // A second tick while already paused must not thrash the state.
+    // A second tick while already backgrounded must not thrash the state.
     await vi.advanceTimersByTimeAsync(2000);
-    expect(store.getSnapshot().paused).toBe(true);
+    expect(store.getSnapshot().backgrounded).toBe(true);
     store.stop();
   });
 
-  it('resumes as soon as the tab becomes visible again', async() => {
+  it('slows down by the background factor while hidden', async() => {
+    const { store, client } = harness();
+    await boot(store);
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    client.listRuns.mockClear();
+    store.refreshNow();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.listRuns).toHaveBeenCalled();
+    expect(repoByKey(store, 'rubensworks/jbr.js')?.nextRefresh).toBe(Date.now() + (IDLE_MIN_MS * 4));
+    store.stop();
+  });
+
+  it('reports visible again as soon as the tab becomes visible', async() => {
     const { store } = harness();
     await boot(store);
     const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
     document.dispatchEvent(new Event('visibilitychange'));
-    expect(store.getSnapshot().paused).toBe(true);
+    expect(store.getSnapshot().backgrounded).toBe(true);
 
     hidden.mockReturnValue(false);
     document.dispatchEvent(new Event('visibilitychange'));
     await vi.advanceTimersByTimeAsync(0);
-    expect(store.getSnapshot().paused).toBe(false);
+    expect(store.getSnapshot().backgrounded).toBe(false);
     store.stop();
   });
 
-  it('unpauses on the next tick when it missed the visibility event', async() => {
+  it('catches up on the next tick when it missed the visibility event', async() => {
     const { store } = harness();
     await boot(store);
     const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
     await vi.advanceTimersByTimeAsync(2000);
-    expect(store.getSnapshot().paused).toBe(true);
+    expect(store.getSnapshot().backgrounded).toBe(true);
 
     hidden.mockReturnValue(false);
     await vi.advanceTimersByTimeAsync(2000);
-    expect(store.getSnapshot().paused).toBe(false);
+    expect(store.getSnapshot().backgrounded).toBe(false);
     store.stop();
   });
 
@@ -787,7 +801,7 @@ describe('tab visibility', () => {
     store.stop();
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
     document.dispatchEvent(new Event('visibilitychange'));
-    expect(store.getSnapshot().paused).toBe(false);
+    expect(store.getSnapshot().backgrounded).toBe(false);
   });
 });
 

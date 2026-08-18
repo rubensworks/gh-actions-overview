@@ -17,17 +17,17 @@ export function StatusFooter({ state, hiddenCount, now }: IStatusFooterProps) {
   const level = ratio > 0.25 ? 'ok' : (ratio > 0.05 ? 'warn' : 'low');
 
   let polling = 'Polling';
-  if (state.paused) {
-    polling = 'Paused — tab is hidden';
-  } else if (state.backoffUntil !== undefined && state.backoffUntil > now) {
+  if (state.backoffUntil !== undefined && state.backoffUntil > now) {
     polling = `${state.backoffReason ?? 'Backing off'} (${formatUntil(state.backoffUntil / 1000, now)})`;
   } else if (state.repoListLoading) {
     polling = 'Loading repositories…';
+  } else if (state.backgrounded) {
+    polling = 'Polling — tab hidden';
   }
 
   return (
     <footer className="footer">
-      <span className={`footer__dot footer__dot--${state.paused ? 'paused' : 'live'}`} />
+      <span className={`footer__dot footer__dot--${state.backgrounded ? 'background' : 'live'}`} />
       <span className="footer__item">{polling}</span>
 
       {state.lastRefreshedAt === undefined ?

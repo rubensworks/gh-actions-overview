@@ -28,10 +28,20 @@ describe('StatusFooter', () => {
       expect(screen.getByText('Polling')).toBeDefined();
     });
 
-    it('reports a hidden tab', () => {
-      const container = renderFooter({ paused: true });
-      expect(screen.getByText('Paused — tab is hidden')).toBeDefined();
-      expect(container.querySelector('.footer__dot--paused')).not.toBeNull();
+    it('reports a hidden tab, still polling', () => {
+      const container = renderFooter({ backgrounded: true });
+      expect(screen.getByText('Polling — tab hidden')).toBeDefined();
+      expect(container.querySelector('.footer__dot--background')).not.toBeNull();
+    });
+
+    it('prefers an active backoff over the hidden-tab label', () => {
+      renderFooter({ backgrounded: true, backoffUntil: NOW + 60_000, backoffReason: 'Rate limit exhausted' });
+      expect(screen.getByText('Rate limit exhausted (1m)')).toBeDefined();
+    });
+
+    it('prefers the repository load label over the hidden-tab label', () => {
+      renderFooter({ backgrounded: true, repoListLoading: true });
+      expect(screen.getByText('Loading repositories…')).toBeDefined();
     });
 
     it('reports an active backoff with its countdown', () => {
@@ -112,7 +122,7 @@ describe('StatusFooter', () => {
     });
 
     it('is there whatever the polling state is', () => {
-      const container = renderFooter({ paused: true, repoListError: 'boom' }, 3);
+      const container = renderFooter({ backgrounded: true, repoListError: 'boom' }, 3);
       expect(container.querySelector('.footer__source')).not.toBeNull();
     });
   });

@@ -31,8 +31,9 @@ this app ever talks to is `api.github.com`, straight from your browser.
 - **A token per organisation**, held alongside your own, so one dashboard can show your
   repositories and an organisation's private ones at the same time.
 - **Smart polling.** Repositories with a queued or running workflow refresh every 15 seconds;
-  quiet ones every 2–5 minutes, jittered so requests do not arrive in bursts. Polling pauses
-  entirely while the tab is hidden.
+  quiet ones every 2–5 minutes, jittered so requests do not arrive in bursts. Polling slows down
+  further while the tab is hidden, rather than stopping, so the favicon and title stay accurate
+  without the tab needing to be focused.
 - **The "pushed X ago" badge catches up the moment a run starts.** A workflow is almost always
   triggered by the push that just landed, but that timestamp otherwise only comes from the
   repository list, which refreshes every ten minutes. The instant a run is seen as active, one

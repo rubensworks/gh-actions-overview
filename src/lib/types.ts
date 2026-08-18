@@ -192,7 +192,11 @@ export interface IDashboardState {
   repoListError: string | undefined;
   rateLimit: IRateLimit | undefined;
   lastRefreshedAt: number | undefined;
-  paused: boolean;
+  /**
+   * Whether the tab is currently hidden. Polling does not stop while backgrounded — only slows
+   * down — so that the favicon and title stay accurate without needing the tab focused.
+   */
+  backgrounded: boolean;
   /**
    * Unix timestamp in milliseconds until which all polling is suspended.
    */
