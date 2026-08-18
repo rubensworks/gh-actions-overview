@@ -1020,7 +1020,7 @@ a.run--off-trunk:hover {
   animation: pulse 2.4s ease-in-out infinite;
 }
 
-.footer__dot--paused {
+.footer__dot--background {
   background: var(--text-faint);
 }
 

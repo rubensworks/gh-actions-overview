@@ -26,6 +26,10 @@ const ERROR_REFRESH_MS = 300_000;
 const CONCURRENCY = 6;
 // Polling slows down by this factor once the quota gets low.
 const LOW_QUOTA_FACTOR = 5;
+// Polling slows down by this factor while the tab is hidden, so the favicon and title stay
+// accurate without needing the tab focused, but a backgrounded tab is not spending quota as if it
+// were the one being watched.
+const BACKGROUND_SLOWDOWN_FACTOR = 4;
 // Anonymous callers get 60 requests an hour for the whole IP, so the initial load has to be small
 // enough to leave room for polling. Conditional requests answered with 304 are free after that.
 const ANONYMOUS_REPO_LIMIT = 15;
@@ -72,7 +76,7 @@ export const INITIAL_STATE: IDashboardState = {
   repoListError: undefined,
   rateLimit: undefined,
   lastRefreshedAt: undefined,
-  paused: false,
+  backgrounded: false,
   backoffUntil: undefined,
   backoffReason: undefined,
 };
@@ -130,10 +134,8 @@ export class DashboardStore {
     this.onFailure = onFailure;
     this.scope = scope ?? { owner: undefined, anonymous: false };
     this.onVisibilityChange = (): void => {
-      this.patch({ paused: document.hidden });
-      if (!document.hidden) {
-        this.tick();
-      }
+      this.patch({ backgrounded: document.hidden });
+      this.tick();
     };
   }
 
@@ -219,14 +221,10 @@ export class DashboardStore {
 
   private tick(): void {
     const now = Date.now();
-    if (document.hidden) {
-      if (!this.state.paused) {
-        this.patch({ paused: true });
-      }
-      return;
-    }
-    if (this.state.paused) {
-      this.patch({ paused: false });
+    // A missed visibilitychange event (the tab was backgrounded through some path that does not
+    // fire it) is caught here instead, so the indicator never drifts from reality for long.
+    if (this.state.backgrounded !== document.hidden) {
+      this.patch({ backgrounded: document.hidden });
     }
     if (this.state.backoffUntil !== undefined) {
       if (this.state.backoffUntil > now) {
@@ -575,7 +573,8 @@ export class DashboardStore {
       ACTIVE_REFRESH_MS :
       IDLE_MIN_MS + Math.floor(Math.random() * (IDLE_MAX_MS - IDLE_MIN_MS));
     const scarce = rateLimit !== undefined && rateLimit.remaining < lowQuota(rateLimit.limit);
-    return scarce ? base * LOW_QUOTA_FACTOR : base;
+    const withQuota = scarce ? base * LOW_QUOTA_FACTOR : base;
+    return document.hidden ? withQuota * BACKGROUND_SLOWDOWN_FACTOR : withQuota;
   }
 
   private detectFailures(ref: IRepoRef, workflows: IWorkflowGroup[]): void {
